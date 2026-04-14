@@ -81,7 +81,7 @@ function MenuContent() {
       {/* 헤더 */}
       <div className="bg-white sticky top-0 z-10 shadow-sm">
         <div className="px-4 py-3">
-          <h1 className="font-bold text-lg text-black">🍺 축제 주점</h1>
+          <h1 className="font-bold text-lg text-black">🎆 게스트하우스융</h1>
           <p className="text-xs text-gray-500">{tableNumber}번 테이블</p>
         </div>
         <div className="flex gap-2 px-4 pb-3 overflow-x-auto">
