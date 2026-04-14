@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import type { Order } from '@/types'
 
@@ -40,6 +40,9 @@ export default function AdminPage() {
         .limit(500)
       if (data) setOrders(data)
     }
+    if (Notification.permission === 'default') {
+    Notification.requestPermission()
+    }
     fetchOrders()
 
     const channel = supabase
@@ -49,6 +52,20 @@ export default function AdminPage() {
         { event: 'INSERT', schema: 'public', table: 'orders' },
         (payload) => {
           setOrders(prev => [payload.new as Order, ...prev])
+          // 브라우저 알림
+        if (Notification.permission === 'granted') {
+        const order = payload.new as Order
+        new Notification('🔔 새 주문이 들어왔어요!', {
+            body: `${order.table_number}번 테이블 · ${order.total_price.toLocaleString()}원`,
+            icon: '/icon.png',
+            badge: '/icon.png',
+            tag: 'new-order',
+        })
+        }
+
+        // 소리 알림
+        const audio = new Audio('https://www.soundjay.com/buttons/sounds/button-09a.mp3')
+        audio.play().catch(() => {})
         }
       )
       .subscribe()
