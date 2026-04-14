@@ -62,21 +62,18 @@ export default function AdminPage() {
           const order = payload.new as Order
 
           // 소리
-          const audio = new Audio('https://www.soundjay.com/buttons/sounds/button-09a.mp3')
-          audio.play().catch(() => {})
+            const audio = new Audio('https://www.soundjay.com/buttons/sounds/button-09a.mp3')
+            audio.play().catch(() => {})
 
-          // Service Worker 알림 (안드로이드 잠금화면)
-          if ('serviceWorker' in navigator && Notification.permission === 'granted') {
+            // 알림 (Service Worker에 직접 메시지 전달 → 더 빠름)
+            if ('serviceWorker' in navigator && Notification.permission === 'granted') {
             navigator.serviceWorker.ready.then(reg => {
-              reg.showNotification('🔔 새 주문이 들어왔어요!', {
-                body: `${order.table_number}번 테이블 · ${order.total_price.toLocaleString()}원`,
-                icon: '/icon.png',
-                badge: '/icon.png',
-                tag: 'new-order',
-                requireInteraction: true,
-              })
+                reg.active?.postMessage({
+                type: 'NEW_ORDER',
+                body: `${order.table_number}번 테이블 · ${order.total_price.toLocaleString()}원`
+                })
             })
-          }
+            }
         }
       )
       .subscribe()
