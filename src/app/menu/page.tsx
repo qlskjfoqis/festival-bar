@@ -13,6 +13,7 @@ function MenuContent() {
   const [menus, setMenus] = useState<Menu[]>([])
   const [cart, setCart] = useState<OrderItem[]>([])
   const [activeCategory, setActiveCategory] = useState('전체')
+  const [quantities, setQuantities] = useState<Record<number, number>>({})
 
   useEffect(() => {
     const fetchMenus = async () => {
@@ -26,13 +27,23 @@ function MenuContent() {
     fetchMenus()
   }, [])
 
+  const getQuantity = (menuId: number) => quantities[menuId] ?? 1
+
+  const changeQuantity = (menuId: number, delta: number) => {
+    setQuantities(prev => ({
+      ...prev,
+      [menuId]: Math.max(1, (prev[menuId] ?? 1) + delta)
+    }))
+  }
+
   const addToCart = (menu: Menu) => {
+    const qty = getQuantity(menu.id)
     setCart(prev => {
       const existing = prev.find(i => i.menu_id === menu.id)
       if (existing) {
         return prev.map(i =>
           i.menu_id === menu.id
-            ? { ...i, quantity: i.quantity + 1 }
+            ? { ...i, quantity: i.quantity + qty }
             : i
         )
       }
@@ -40,23 +51,15 @@ function MenuContent() {
         menu_id: menu.id,
         name: menu.name,
         price: menu.price,
-        quantity: 1
+        quantity: qty
       }]
     })
+    // 담고 나면 수량 1로 초기화
+    setQuantities(prev => ({ ...prev, [menu.id]: 1 }))
   }
 
   const removeFromCart = (menuId: number) => {
-    setCart(prev => {
-      const existing = prev.find(i => i.menu_id === menuId)
-      if (existing?.quantity === 1) {
-        return prev.filter(i => i.menu_id !== menuId)
-      }
-      return prev.map(i =>
-        i.menu_id === menuId
-          ? { ...i, quantity: i.quantity - 1 }
-          : i
-      )
-    })
+    setCart(prev => prev.filter(i => i.menu_id !== menuId))
   }
 
   const totalPrice = cart.reduce((sum, i) => sum + i.price * i.quantity, 0)
@@ -77,14 +80,10 @@ function MenuContent() {
     <div className="min-h-screen bg-gray-50">
       {/* 헤더 */}
       <div className="bg-white sticky top-0 z-10 shadow-sm">
-        <div className="px-4 py-3 flex items-center justify-between">
-          <div>
-            <h1 className="font-bold text-lg text-black">🍺 축제 주점</h1>
-            <p className="text-xs text-gray-700">{tableNumber}번 테이블</p>
-          </div>
+        <div className="px-4 py-3">
+          <h1 className="font-bold text-lg text-black">🍺 축제 주점</h1>
+          <p className="text-xs text-gray-500">{tableNumber}번 테이블</p>
         </div>
-
-        {/* 카테고리 탭 */}
         <div className="flex gap-2 px-4 pb-3 overflow-x-auto">
           {categories.map(cat => (
             <button
@@ -103,37 +102,72 @@ function MenuContent() {
 
       {/* 메뉴 목록 */}
       <div className="p-4 grid grid-cols-2 gap-3 pb-32">
-        {filtered.map(menu => {
-          const cartItem = cart.find(i => i.menu_id === menu.id)
-          return (
-            <div key={menu.id} className="bg-white rounded-xl p-4 shadow-sm">
-              <div className="font-medium text-sm text-black">{menu.name}</div>
-              <div className="text-[#189ad3] font-bold mt-1">
-                {menu.price.toLocaleString()}원
-              </div>
-              <div className="mt-3 flex items-center justify-between">
-                {cartItem ? (
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => removeFromCart(menu.id)}
-                      className="w-7 h-7 rounded-full bg-orange-100 text-[#189ad3] font-bold"
-                    >−</button>
-                    <span className="font-bold text-gray-700">{cartItem.quantity}</span>
-                    <button
-                      onClick={() => addToCart(menu)}
-                      className="w-7 h-7 rounded-full bg-[#189ad3] text-white font-bold"
-                    >+</button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => addToCart(menu)}
-                    className="w-full py-1.5 rounded-lg bg-[#189ad3] text-white text-sm font-medium"
-                  >
-                    담기
-                  </button>
-                )}
-              </div>
+                {filtered.map(menu => {
+                const cartItem = cart.find(i => i.menu_id === menu.id)
+                const qty = getQuantity(menu.id)
+                return (
+                    <div key={menu.id} className="bg-white rounded-xl shadow-sm flex flex-col gap-2 overflow-hidden">
+        {/* 메뉴 이미지 */}
+        <div className="w-full h-30 aspect-square relative">
+        {menu.image_url ? (
+            <img
+            src={menu.image_url}
+            alt={menu.name}
+            className="absolute inset-0 w-full h-full object-cover"
+            />
+        ) : (
+            <div className="absolute inset-0 bg-gray-100 flex items-center justify-center">
+            <span className="text-3xl">🍽</span>
             </div>
+        )}
+        </div>
+        <div className="px-3 pb-3 flex flex-col gap-2">
+        <div className="font-medium text-sm text-gray-800">{menu.name}</div>
+        <div className="text-[#189ad3] font-bold">
+            {menu.price.toLocaleString()}원
+        </div>
+
+              {/* 수량 선택 */}
+              <div className="flex items-center justify-between mt-1">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => changeQuantity(menu.id, -1)}
+                    className="w-7 h-7 rounded-full bg-gray-100 text-gray-600 font-bold text-sm"
+                  >
+                    −
+                  </button>
+                  <span className="font-bold text-sm w-4 text-center text-gray-700">{qty}</span>
+                  <button
+                    onClick={() => changeQuantity(menu.id, +1)}
+                    className="w-7 h-7 rounded-full bg-gray-100 text-gray-600 font-bold text-sm"
+                  >
+                    +
+                  </button>
+                </div>
+                <button
+                  onClick={() => addToCart(menu)}
+                  className="px-3 py-1.5 rounded-lg bg-[#189ad3] text-white text-sm font-medium"
+                >
+                  담기
+                </button>
+              </div>
+
+              {/* 이미 담긴 경우 표시 */}
+              {cartItem && (
+                <div className="flex items-center justify-between bg-orange-50 rounded-lg px-3 py-1.5">
+                  <span className="text-xs text-[#189ad3] font-medium">
+                    장바구니 {cartItem.quantity}개
+                  </span>
+                  <button
+                    onClick={() => removeFromCart(menu.id)}
+                    className="text-xs text-gray-400"
+                  >
+                    빼기
+                  </button>
+                </div>
+              )}
+            </div>
+        </div>
           )
         })}
       </div>

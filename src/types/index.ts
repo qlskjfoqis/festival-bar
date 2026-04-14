@@ -4,6 +4,7 @@ export type Menu = {
   price: number
   category: string
   is_available: boolean
+  image_url: string | null
 }
 
 export type OrderItem = {
