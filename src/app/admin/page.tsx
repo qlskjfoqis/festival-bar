@@ -29,14 +29,12 @@ export default function AdminPage() {
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [selectedDay, setSelectedDay] = useState<string>('전체')
   const [deleteTarget, setDeleteTarget] = useState<Order | null>(null)
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
 
   useEffect(() => {
-    // Service Worker 등록
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch(() => {})
     }
-
-    // 알림 권한 요청
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission()
     }
@@ -58,22 +56,17 @@ export default function AdminPage() {
         { event: 'INSERT', schema: 'public', table: 'orders' },
         (payload) => {
           setOrders(prev => [payload.new as Order, ...prev])
-
           const order = payload.new as Order
-
-          // 소리
-            const audio = new Audio('https://www.soundjay.com/buttons/sounds/button-09a.mp3')
-            audio.play().catch(() => {})
-
-            // 알림 (Service Worker에 직접 메시지 전달 → 더 빠름)
-            if ('serviceWorker' in navigator && Notification.permission === 'granted') {
+          const audio = new Audio('https://www.soundjay.com/buttons/sounds/button-09a.mp3')
+          audio.play().catch(() => {})
+          if ('serviceWorker' in navigator && Notification.permission === 'granted') {
             navigator.serviceWorker.ready.then(reg => {
-                reg.active?.postMessage({
+              reg.active?.postMessage({
                 type: 'NEW_ORDER',
                 body: `${order.table_number}번 테이블 · ${order.total_price.toLocaleString()}원`
-                })
+              })
             })
-            }
+          }
         }
       )
       .subscribe()
@@ -121,6 +114,28 @@ export default function AdminPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* 이미지 라이트박스 */}
+      {lightboxUrl && (
+        <div
+          className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4"
+          onClick={() => setLightboxUrl(null)}
+        >
+          <img
+            src={lightboxUrl}
+            alt="입금 내역"
+            className="max-w-full max-h-full rounded-xl object-contain"
+            onClick={e => e.stopPropagation()}
+          />
+          <button
+            onClick={() => setLightboxUrl(null)}
+            className="absolute top-4 right-4 text-white text-2xl font-bold bg-black/40 w-10 h-10 rounded-full flex items-center justify-center"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {/* 삭제 확인 모달 */}
       {deleteTarget && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm flex flex-col gap-4">
@@ -172,9 +187,7 @@ export default function AdminPage() {
             key={day}
             onClick={() => setSelectedDay(day)}
             className={`px-3 py-1 rounded-full text-sm whitespace-nowrap transition
-              ${selectedDay === day
-                ? 'bg-[#189ad3] text-white'
-                : 'bg-gray-100 text-gray-600'}`}
+              ${selectedDay === day ? 'bg-[#189ad3] text-white' : 'bg-gray-100 text-gray-600'}`}
           >
             {day}
           </button>
@@ -206,6 +219,7 @@ export default function AdminPage() {
       </div>
 
       <div className="p-4 flex flex-col gap-3">
+        {/* 대기중 탭 */}
         {activeTab === 'pending' && (
           <>
             {pending.length === 0 && (
@@ -225,11 +239,35 @@ export default function AdminPage() {
                     <button onClick={() => setDeleteTarget(order)} className="text-gray-300 hover:text-red-400 transition text-base">🗑</button>
                   </div>
                 </div>
+
                 <div className="mt-2 text-sm text-black">
                   {order.items.map((item, i) => (
                     <span key={i}>{item.name} {item.quantity}개{i < order.items.length - 1 ? ', ' : ''}</span>
                   ))}
                 </div>
+
+                {/* 입금 캡처 썸네일 */}
+                {order.receipt_url && (
+                  <div className="mt-3">
+                    <button
+                      onClick={() => setLightboxUrl(order.receipt_url!)}
+                      className="relative group"
+                    >
+                      <img
+                        src={order.receipt_url}
+                        alt="입금 캡처"
+                        className="w-full max-h-40 object-cover rounded-lg border border-gray-100"
+                      />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition rounded-lg flex items-center justify-center">
+                        <span className="opacity-0 group-hover:opacity-100 text-white text-xs bg-black/50 px-2 py-1 rounded-full transition">
+                          크게 보기
+                        </span>
+                      </div>
+                    </button>
+                    <p className="text-xs text-gray-400 mt-1">입금 캡처 첨부됨 · 탭하면 크게 볼 수 있어요</p>
+                  </div>
+                )}
+
                 <div className="mt-3 flex justify-between items-center">
                   <span className="font-bold text-[#189ad3]">{order.total_price.toLocaleString()}원</span>
                   <button
@@ -244,6 +282,7 @@ export default function AdminPage() {
           </>
         )}
 
+        {/* 완료 탭 */}
         {activeTab === 'confirmed' && (
           <>
             {confirmed.length === 0 && (
@@ -267,15 +306,29 @@ export default function AdminPage() {
                   </button>
                   <button onClick={() => setDeleteTarget(order)} className="pr-4 text-gray-300 hover:text-red-400 transition text-base">🗑</button>
                 </div>
+
                 {expandedId === order.id && (
-                  <div className="px-4 pb-4 border-t pt-3">
-                    <div className="text-sm text-gray-400 mb-2">{formatTime(order.created_at)}</div>
+                  <div className="px-4 pb-4 border-t pt-3 flex flex-col gap-2">
+                    <div className="text-sm text-gray-400 mb-1">{formatTime(order.created_at)}</div>
                     {order.items.map((item, i) => (
                       <div key={i} className="flex justify-between text-sm py-1.5 border-b last:border-0">
                         <span className="text-black">{item.name} × {item.quantity}</span>
                         <span className="font-medium text-black">{(item.price * item.quantity).toLocaleString()}원</span>
                       </div>
                     ))}
+                    {/* 입금 캡처 */}
+                    {order.receipt_url && (
+                      <div className="mt-2">
+                        <p className="text-xs text-gray-400 mb-1">입금 캡처</p>
+                        <button onClick={() => setLightboxUrl(order.receipt_url!)}>
+                          <img
+                            src={order.receipt_url}
+                            alt="입금 캡처"
+                            className="w-full max-h-48 object-cover rounded-lg border border-gray-100"
+                          />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -283,6 +336,7 @@ export default function AdminPage() {
           </>
         )}
 
+        {/* 통계 탭 */}
         {activeTab === 'stats' && (
           <>
             {selectedDay === '전체' && (

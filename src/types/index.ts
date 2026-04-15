@@ -21,4 +21,5 @@ export type Order = {
   total_price: number
   status: 'pending' | 'confirmed'
   created_at: string
+  receipt_url?: string
 }
