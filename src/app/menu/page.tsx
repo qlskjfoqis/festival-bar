@@ -353,15 +353,21 @@ function MenuContent() {
                                     <span className="bg-amber-200 text-amber-800 rounded px-1 py-0.5 font-semibold shrink-0 leading-relaxed">
                                       택1
                                     </span>
-                                    <span className="leading-relaxed">
-                                      {g.items.map(i => i.name).join(' 또는 ')}
+                                    <span className="leading-relaxed flex flex-col">
+                                      {g.items.map((i, idx) => (
+                                        <span key={i.id}>
+                                          {i.name}{idx < g.items.length - 1 ? ' 또는' : ''}
+                                        </span>
+                                      ))}
                                     </span>
                                   </>
                                 ) : (
                                   <>
                                     <span className="text-amber-500 mt-0.5 shrink-0">✦</span>
-                                    <span className="leading-relaxed">
-                                      {g.items.map(i => i.name).join('  ·  ')}
+                                    <span className="leading-relaxed flex flex-col">
+                                      {g.items.map(i => (
+                                        <span key={i.id}>{i.name}</span>
+                                      ))}
                                     </span>
                                   </>
                                 )}
