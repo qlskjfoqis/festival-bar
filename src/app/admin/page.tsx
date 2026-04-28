@@ -306,7 +306,7 @@ export default function AdminPage() {
                         <span className="text-sm text-gray-400">{getRelativeTime(order.created_at)}</span>
                         <button
                           onClick={() => setDeleteTarget(order)}
-                          className="text-gray-200 hover:text-red-300 transition p-1.5 ml-1"
+                          className="text-gray-900 hover:text-red-400 transition p-1.5 ml-1 text-xl"
                         >
                           🗑
                         </button>
@@ -393,7 +393,7 @@ export default function AdminPage() {
                   </button>
                   <button
                     onClick={() => setDeleteTarget(order)}
-                    className="pr-4 text-gray-200 hover:text-red-300 transition"
+                    className="pr-4 text-gray-400 hover:text-red-400 transition text-xl"
                   >
                     🗑
                   </button>
