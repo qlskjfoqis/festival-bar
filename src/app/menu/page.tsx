@@ -220,14 +220,14 @@ function MenuContent() {
         <div className="w-full max-w-sm flex flex-col items-center gap-6">
           <div className="text-center">
             <div className="text-5xl mb-4">🏮</div>
-            <h1 className="font-bold text-2xl text-amber-50 tracking-tight">게스트하우스 융</h1>
+            <h1 className="font-bold text-2xl text-amber-50 tracking-tight">게스트하우스융</h1>
             <p className="text-amber-300/60 text-sm mt-1">{tableNumber}번 테이블에 오신 걸 환영해요</p>
           </div>
 
           {/* 일반 주문 */}
           <div className="bg-[#faf5ee] rounded-3xl p-6 w-full flex flex-col gap-5">
             <p className="text-sm font-semibold text-[#5c3d1e] text-center">
-              몇 분이 함께하시나요?
+              인원수를 선택해주세요
             </p>
             <div className="grid grid-cols-4 gap-2">
               {[1, 2, 3, 4, 5, 6, 7, 8].map(n => (
@@ -291,7 +291,7 @@ function MenuContent() {
       <div className="bg-[#1c1208] sticky top-0 z-10 px-4 pt-4 pb-3">
         <div className="flex justify-between items-start">
           <div>
-            <h1 className="font-bold text-lg text-amber-50 tracking-tight">🏮 게스트하우스 융</h1>
+            <h1 className="font-bold text-lg text-amber-50 tracking-tight">🏮 게스트하우스융</h1>
             <p className="text-xs text-amber-300/50 mt-0.5">
               {tableNumber}번 테이블 · {isAdditionalOrder ? '추가 주문' : `${personCount}명`}
             </p>

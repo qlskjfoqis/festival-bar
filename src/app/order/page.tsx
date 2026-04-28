@@ -78,7 +78,7 @@ export default function OrderPage() {
     <div className="min-h-screen bg-[#faf5ee]">
       {/* 헤더 */}
       <div className="bg-[#1c1208] px-4 pt-4 pb-3">
-        <h1 className="font-bold text-lg text-amber-50 tracking-tight">🏮 게스트하우스 융</h1>
+        <h1 className="font-bold text-lg text-amber-50 tracking-tight">🏮 게스트하우스융</h1>
         <p className="text-xs text-amber-300/50 mt-0.5">
           {tableNumber}번 테이블 · {isAdditionalOrder ? '추가 주문' : `${personCount}명`} · 주문 확인
         </p>
