@@ -7,6 +7,15 @@ import type { Menu, OrderItem } from '@/types'
 
 const TABLE_FEE_PER_PERSON = 1000
 
+type SetGroup = {
+  id: number
+  set_menu_id: number
+  name: string
+  min_select: number
+  max_select: number
+  items: Menu[]
+}
+
 function MenuContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -14,30 +23,57 @@ function MenuContent() {
 
   const [menus, setMenus] = useState<Menu[]>([])
   const [cart, setCart] = useState<OrderItem[]>([])
-  const [activeCategory, setActiveCategory] = useState('전체')
   const [quantities, setQuantities] = useState<Record<number, number>>({})
   const [personCount, setPersonCount] = useState<number | null>(null)
   const [selectedPerson, setSelectedPerson] = useState(1)
 
+  const [setGroups, setSetGroups] = useState<Record<number, SetGroup[]>>({})
+  const [activeSet, setActiveSet] = useState<Menu | null>(null)
+  const [groupSelections, setGroupSelections] = useState<Record<number, number[]>>({})
+  const [setQty, setSetQty] = useState(1)
+
   useEffect(() => {
-    // 이미 인원수를 선택한 경우 (뒤로 왔을 때 등)
     const saved = sessionStorage.getItem('personCount')
     if (saved) setPersonCount(Number(saved))
 
-    const fetchMenus = async () => {
-      const { data } = await supabase
-        .from('menus')
-        .select('*')
-        .eq('is_available', true)
-        .order('category')
-      if (data) setMenus(data)
+    const fetchData = async () => {
+      const [menusRes, groupsRes, itemsRes] = await Promise.all([
+        supabase.from('menus').select('*').order('category'),
+        supabase.from('set_groups').select('*'),
+        supabase.from('set_group_items').select('*')
+      ])
+
+      if (!menusRes.data) return
+      setMenus(menusRes.data.filter((m: Menu) => m.is_available))
+
+      if (groupsRes.data && itemsRes.data) {
+        const menuMap = new Map(menusRes.data.map((m: Menu) => [m.id, m]))
+        const itemsByGroup = new Map<number, Menu[]>()
+        for (const row of itemsRes.data) {
+          if (!itemsByGroup.has(row.group_id)) itemsByGroup.set(row.group_id, [])
+          const menu = menuMap.get(row.menu_id)
+          if (menu) itemsByGroup.get(row.group_id)!.push(menu)
+        }
+        const grouped: Record<number, SetGroup[]> = {}
+        for (const g of groupsRes.data) {
+          if (!grouped[g.set_menu_id]) grouped[g.set_menu_id] = []
+          grouped[g.set_menu_id].push({ ...g, items: itemsByGroup.get(g.id) ?? [] })
+        }
+        setSetGroups(grouped)
+      }
     }
-    fetchMenus()
+    fetchData()
   }, [])
 
   const confirmPersonCount = () => {
     sessionStorage.setItem('personCount', String(selectedPerson))
     setPersonCount(selectedPerson)
+  }
+
+  const goAdditionalOrder = () => {
+    // personCount=0 → 추가 주문 (테이블비 없음)
+    sessionStorage.setItem('personCount', '0')
+    setPersonCount(0)
   }
 
   const getQuantity = (menuId: number) => quantities[menuId] ?? 1
@@ -55,87 +91,194 @@ function MenuContent() {
       const existing = prev.find(i => i.menu_id === menu.id)
       if (existing) {
         return prev.map(i =>
-          i.menu_id === menu.id
-            ? { ...i, quantity: i.quantity + qty }
-            : i
+          i.menu_id === menu.id ? { ...i, quantity: i.quantity + qty } : i
         )
       }
       return [...prev, {
         menu_id: menu.id,
         name: menu.name,
+        admin_name: menu.admin_name ?? undefined,
         price: menu.price,
-        quantity: qty
+        quantity: qty,
       }]
     })
     setQuantities(prev => ({ ...prev, [menu.id]: 1 }))
   }
 
-  const removeFromCart = (menuId: number) => {
-    setCart(prev => prev.filter(i => i.menu_id !== menuId))
+  const removeFromCart = (menuId: number, name?: string) => {
+    setCart(prev => prev.filter(i => {
+      if (i.menu_id !== menuId) return true
+      if (name !== undefined) return i.name !== name
+      return false
+    }))
+  }
+
+  const openSetModal = (setMenu: Menu) => {
+    setActiveSet(setMenu)
+    setSetQty(1)
+    const initial: Record<number, number[]> = {}
+    for (const g of setGroups[setMenu.id] ?? []) initial[g.id] = []
+    setGroupSelections(initial)
+  }
+
+  const isChoiceGroup = (g: SetGroup) => g.max_select < g.items.length
+
+  const toggleSelection = (groupId: number, menuId: number, maxSelect: number) => {
+    setGroupSelections(prev => {
+      const current = prev[groupId] ?? []
+      if (current.includes(menuId)) {
+        return { ...prev, [groupId]: current.filter(id => id !== menuId) }
+      }
+      if (maxSelect === 1) return { ...prev, [groupId]: [menuId] }
+      if (current.length < maxSelect) return { ...prev, [groupId]: [...current, menuId] }
+      return { ...prev, [groupId]: [...current.slice(0, maxSelect - 1), menuId] }
+    })
+  }
+
+  const isSelectionComplete = () => {
+    if (!activeSet) return false
+    return (setGroups[activeSet.id] ?? []).every(g => {
+      if (!isChoiceGroup(g)) return true
+      return (groupSelections[g.id] ?? []).length >= g.min_select
+    })
+  }
+
+  const addSetToCart = () => {
+    if (!activeSet || !isSelectionComplete()) return
+
+    const fixedGroups = (setGroups[activeSet.id] ?? []).filter(g => !isChoiceGroup(g))
+    const fixedLabels = fixedGroups.flatMap(g => g.items.map(i => i.name))
+    const fixedAdminLabels = fixedGroups.flatMap(g => g.items.map(i => i.admin_name || i.name))
+
+    const choiceGroups = (setGroups[activeSet.id] ?? []).filter(isChoiceGroup)
+    const choiceLabels = choiceGroups
+      .map(g =>
+        (groupSelections[g.id] ?? [])
+          .map(id => g.items.find(i => i.id === id)?.name)
+          .filter(Boolean)
+          .join(', ')
+      )
+      .filter(Boolean)
+    const choiceAdminLabels = choiceGroups
+      .map(g =>
+        (groupSelections[g.id] ?? [])
+          .map(id => { const item = g.items.find(i => i.id === id); return item?.admin_name || item?.name })
+          .filter(Boolean)
+          .join(', ')
+      )
+      .filter(Boolean)
+
+    const allLabels = [...fixedLabels, ...choiceLabels]
+    const allAdminLabels = [...fixedAdminLabels, ...choiceAdminLabels]
+
+    const name = allLabels.length > 0
+      ? `${activeSet.name} (${allLabels.join(' · ')})`
+      : activeSet.name
+    const admin_name = allAdminLabels.length > 0
+      ? `${activeSet.admin_name || activeSet.name} (${allAdminLabels.join(' · ')})`
+      : (activeSet.admin_name || activeSet.name)
+
+    setCart(prev => {
+      const existing = prev.find(i => i.menu_id === activeSet.id && i.name === name)
+      if (existing) {
+        return prev.map(i =>
+          i.menu_id === activeSet.id && i.name === name
+            ? { ...i, quantity: i.quantity + setQty }
+            : i
+        )
+      }
+      return [...prev, { menu_id: activeSet.id, name, admin_name, price: activeSet.price, quantity: setQty }]
+    })
+    setActiveSet(null)
   }
 
   const totalPrice = cart.reduce((sum, i) => sum + i.price * i.quantity, 0)
   const cartCount = cart.reduce((sum, i) => sum + i.quantity, 0)
+  const isSetMenu = (menuId: number) => menuId in setGroups
+  const isAdditionalOrder = personCount === 0
 
-  const categories = ['전체', ...Array.from(new Set(menus.map(m => m.category)))]
-  const filtered = activeCategory === '전체'
-    ? menus
-    : menus.filter(m => m.category === activeCategory)
+  // 카테고리별 그룹핑 (Supabase order 순서 유지)
+  const categoryOrder = Array.from(new Set(menus.map(m => m.category)))
+  const menusByCategory = categoryOrder.map(cat => {
+    const items = menus.filter(m => m.category === cat)
+    const sorted = cat === '세트'
+      ? [...items].sort((a, b) => a.name.localeCompare(b.name))
+      : [...items].sort((a, b) => b.price - a.price)
+    return { category: cat, items: sorted }
+  })
 
   const goToPayment = () => {
     sessionStorage.setItem('cart', JSON.stringify(cart))
     sessionStorage.setItem('tableNumber', String(tableNumber))
-    // personCount는 이미 저장돼 있음
     router.push('/order')
   }
 
   // ── 인원수 선택 화면 ──────────────────────────────────────
   if (personCount === null) {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6">
-        <div className="bg-white rounded-2xl shadow-sm p-8 w-full max-w-sm flex flex-col items-center gap-6">
-          <div className="text-4xl">👋</div>
+      <div className="min-h-screen bg-[#1c1208] flex flex-col items-center justify-center p-6">
+        <div className="w-full max-w-sm flex flex-col items-center gap-6">
           <div className="text-center">
-            <h1 className="font-bold text-xl text-black mb-1">환영해요!</h1>
-            <p className="text-gray-500 text-sm">{tableNumber}번 테이블</p>
+            <div className="text-5xl mb-4">🏮</div>
+            <h1 className="font-bold text-2xl text-amber-50 tracking-tight">게스트하우스 융</h1>
+            <p className="text-amber-300/60 text-sm mt-1">{tableNumber}번 테이블에 오신 걸 환영해요</p>
           </div>
 
-          <div className="w-full">
-            <p className="text-sm font-medium text-gray-700 mb-3 text-center">
-              인원수를 선택해주세요
+          {/* 일반 주문 */}
+          <div className="bg-[#faf5ee] rounded-3xl p-6 w-full flex flex-col gap-5">
+            <p className="text-sm font-semibold text-[#5c3d1e] text-center">
+              몇 분이 함께하시나요?
             </p>
             <div className="grid grid-cols-4 gap-2">
               {[1, 2, 3, 4, 5, 6, 7, 8].map(n => (
                 <button
                   key={n}
                   onClick={() => setSelectedPerson(n)}
-                  className={`py-3 rounded-xl font-bold text-lg transition
+                  className={`py-3.5 rounded-2xl font-bold text-lg transition-all
                     ${selectedPerson === n
-                      ? 'bg-[#189ad3] text-white'
-                      : 'bg-gray-100 text-gray-600'}`}
+                      ? 'bg-[#e07640] text-white shadow-md'
+                      : 'bg-white text-[#5c3d1e] shadow-sm'}`}
                 >
                   {n}
                 </button>
               ))}
             </div>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 text-center">
+              <p className="text-xs text-amber-700/70 mb-0.5">테이블비</p>
+              <p className="font-bold text-[#e07640] text-xl">
+                {(TABLE_FEE_PER_PERSON * selectedPerson).toLocaleString()}원
+              </p>
+              <p className="text-xs text-amber-700/50 mt-0.5">
+                {selectedPerson}명 × {TABLE_FEE_PER_PERSON.toLocaleString()}원
+              </p>
+            </div>
+
+            <button
+              onClick={confirmPersonCount}
+              className="w-full py-4 bg-[#e07640] text-white rounded-2xl font-bold text-base shadow-md active:scale-95 transition-transform"
+            >
+              메뉴 보러 가기 →
+            </button>
           </div>
 
-          <div className="w-full bg-blue-50 rounded-xl px-4 py-3 text-center">
-            <p className="text-xs text-gray-500">테이블비</p>
-            <p className="font-bold text-[#189ad3] text-lg">
-              {(TABLE_FEE_PER_PERSON * selectedPerson).toLocaleString()}원
-            </p>
-            <p className="text-xs text-gray-400 mt-0.5">
-              {selectedPerson}명 × {TABLE_FEE_PER_PERSON.toLocaleString()}원
-            </p>
+          {/* 추가 주문 */}
+          <div className="w-full flex flex-col items-center gap-2">
+            <div className="flex items-center gap-3 w-full">
+              <div className="flex-1 h-px bg-amber-200/20" />
+              <span className="text-xs text-amber-300/40">또는</span>
+              <div className="flex-1 h-px bg-amber-200/20" />
+            </div>
+            <button
+              onClick={goAdditionalOrder}
+              className="w-full py-4 bg-white/10 border border-white/20 text-amber-100 rounded-2xl font-semibold text-base active:bg-white/20 transition"
+            >
+              추가 주문하기
+              <span className="block text-xs text-amber-300/50 font-normal mt-0.5">
+                이미 테이블비를 내셨나요? 여기서 시작하세요
+              </span>
+            </button>
           </div>
-
-          <button
-            onClick={confirmPersonCount}
-            className="w-full py-4 bg-[#189ad3] text-white rounded-xl font-bold text-base"
-          >
-            메뉴 보러 가기
-          </button>
         </div>
       </div>
     )
@@ -143,116 +286,291 @@ function MenuContent() {
 
   // ── 메뉴 화면 ──────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="bg-white sticky top-0 z-10 shadow-sm">
-        <div className="px-4 py-3 flex justify-between items-start">
+    <div className="min-h-screen bg-[#faf5ee]">
+      {/* 헤더 */}
+      <div className="bg-[#1c1208] sticky top-0 z-10 px-4 pt-4 pb-3">
+        <div className="flex justify-between items-start">
           <div>
-            <h1 className="font-bold text-lg text-black">🎆 게스트하우스융</h1>
-            <p className="text-xs text-gray-500">{tableNumber}번 테이블 · {personCount}명</p>
+            <h1 className="font-bold text-lg text-amber-50 tracking-tight">🏮 게스트하우스 융</h1>
+            <p className="text-xs text-amber-300/50 mt-0.5">
+              {tableNumber}번 테이블 · {isAdditionalOrder ? '추가 주문' : `${personCount}명`}
+            </p>
           </div>
           <button
             onClick={() => {
               sessionStorage.removeItem('personCount')
               setPersonCount(null)
             }}
-            className="text-xs text-gray-400 border border-gray-200 px-2 py-1 rounded-lg mt-1"
+            className="text-xs text-amber-200/40 border border-amber-200/20 px-2.5 py-1 rounded-lg mt-1 active:bg-white/10 transition"
           >
-            인원 변경
+            {isAdditionalOrder ? '처음으로' : '인원 변경'}
           </button>
         </div>
-        <div className="flex gap-2 px-4 pb-3 overflow-x-auto">
-          {categories.map(cat => (
-            <button
-              key={cat}
-              onClick={() => setActiveCategory(cat)}
-              className={`px-3 py-1 rounded-full text-sm whitespace-nowrap transition
-                ${activeCategory === cat
-                  ? 'bg-[#189ad3] text-white'
-                  : 'bg-gray-100 text-gray-600'}`}
-            >
-              {cat}
-            </button>
-          ))}
-        </div>
       </div>
 
-      <div className="p-4 grid grid-cols-2 gap-3 pb-32">
-        {filtered.map(menu => {
-          const cartItem = cart.find(i => i.menu_id === menu.id)
-          const qty = getQuantity(menu.id)
-          return (
-            <div key={menu.id} className="bg-white rounded-xl shadow-sm flex flex-col gap-2 overflow-hidden">
-              <div className="w-full h-30 aspect-square relative">
-                {menu.image_url ? (
-                  <img
-                    src={menu.image_url}
-                    alt={menu.name}
-                    className="absolute inset-0 w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="absolute inset-0 bg-gray-100 flex items-center justify-center">
-                    <span className="text-3xl">🍽</span>
-                  </div>
-                )}
-              </div>
-              <div className="px-3 pb-3 flex flex-col gap-2">
-                <div className="font-medium text-sm text-gray-800">{menu.name}</div>
-                <div className="text-[#189ad3] font-bold">
-                  {menu.price.toLocaleString()}원
-                </div>
-                <div className="flex items-center justify-between mt-1">
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => changeQuantity(menu.id, -1)}
-                      className="w-7 h-7 rounded-full bg-gray-100 text-gray-600 font-bold text-sm"
-                    >
-                      −
-                    </button>
-                    <span className="font-bold text-sm w-4 text-center text-gray-700">{qty}</span>
-                    <button
-                      onClick={() => changeQuantity(menu.id, +1)}
-                      className="w-7 h-7 rounded-full bg-gray-100 text-gray-600 font-bold text-sm"
-                    >
-                      +
-                    </button>
-                  </div>
-                  <button
-                    onClick={() => addToCart(menu)}
-                    className="px-3 py-1.5 rounded-lg bg-[#189ad3] text-white text-sm font-medium"
-                  >
-                    담기
-                  </button>
-                </div>
-                {cartItem && (
-                  <div className="flex items-center justify-between bg-orange-50 rounded-lg px-3 py-1.5">
-                    <span className="text-xs text-[#189ad3] font-medium">
-                      장바구니 {cartItem.quantity}개
-                    </span>
-                    <button
-                      onClick={() => removeFromCart(menu.id)}
-                      className="text-xs text-gray-400"
-                    >
-                      빼기
-                    </button>
-                  </div>
-                )}
+      {/* 카테고리별 메뉴 */}
+      <div className="pb-36">
+        {menusByCategory.map(({ category, items }, sectionIdx) => (
+          <div key={category}>
+            {/* 섹션 헤더 */}
+            <div className={`px-4 pt-6 pb-3 ${sectionIdx > 0 ? 'mt-2' : ''}`}>
+              <div className="flex items-center gap-3">
+                <span className="font-bold text-base text-[#1c1208]">{category}</span>
+                <div className="flex-1 h-px bg-[#d4a87a]/30" />
               </div>
             </div>
-          )
-        })}
+
+            {/* 메뉴 카드 목록 */}
+            <div className="px-4 flex flex-col gap-2">
+              {items.map(menu => {
+                const cartItems = cart.filter(i => i.menu_id === menu.id)
+                const qty = getQuantity(menu.id)
+                const isSet = isSetMenu(menu.id)
+                const groups = setGroups[menu.id] ?? []
+
+                if (isSet) {
+                  return (
+                    <div
+                      key={menu.id}
+                      className="bg-amber-50 border border-amber-200 rounded-2xl overflow-hidden"
+                    >
+                      <div className="px-4 pt-4 pb-3 flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <span className="text-xs bg-[#e07640] text-white px-2 py-0.5 rounded-full font-semibold">
+                              세트
+                            </span>
+                            <span className="font-bold text-base text-[#1c1208]">{menu.name}</span>
+                          </div>
+                          <p className="text-[#e07640] font-bold text-base mb-2">
+                            {menu.price.toLocaleString()}원
+                          </p>
+                          <div className="flex flex-col gap-1">
+                            {groups.map(g => (
+                              <div key={g.id} className="flex items-start gap-1.5 text-xs text-[#5c3d1e]/80">
+                                {isChoiceGroup(g) ? (
+                                  <>
+                                    <span className="bg-amber-200 text-amber-800 rounded px-1 py-0.5 font-semibold shrink-0 leading-relaxed">
+                                      택1
+                                    </span>
+                                    <span className="leading-relaxed">
+                                      {g.items.map(i => i.name).join(' 또는 ')}
+                                    </span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span className="text-amber-500 mt-0.5 shrink-0">✦</span>
+                                    <span className="leading-relaxed">
+                                      {g.items.map(i => i.name).join('  ·  ')}
+                                    </span>
+                                  </>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => openSetModal(menu)}
+                          className="px-3 py-2 rounded-xl bg-[#e07640] text-white text-sm font-semibold shrink-0 shadow-sm active:scale-95 transition-transform"
+                        >
+                          선택
+                        </button>
+                      </div>
+
+                      {cartItems.length > 0 && (
+                        <div className="border-t border-amber-200 px-4 py-2 flex flex-col gap-1">
+                          {cartItems.map(cartItem => (
+                            <div key={cartItem.name} className="flex items-center justify-between">
+                              <span className="text-xs text-amber-700 font-medium">
+                                ✓ {cartItem.name} · {cartItem.quantity}개
+                              </span>
+                              <button
+                                onClick={() => removeFromCart(menu.id, cartItem.name)}
+                                className="text-xs text-amber-400"
+                              >
+                                취소
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                }
+
+                return (
+                  <div key={menu.id} className="bg-white rounded-2xl shadow-sm overflow-hidden">
+                    <div className="px-4 py-3.5 flex items-center justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm text-[#1c1208] leading-snug">{menu.name}</p>
+                        <p className="text-[#e07640] font-bold text-sm mt-0.5">
+                          {menu.price.toLocaleString()}원
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={() => changeQuantity(menu.id, -1)}
+                          className="w-7 h-7 rounded-full bg-[#faf5ee] text-[#5c3d1e] font-bold text-sm flex items-center justify-center active:scale-90 transition-transform"
+                        >
+                          −
+                        </button>
+                        <span className="font-bold text-sm w-4 text-center text-[#1c1208]">{qty}</span>
+                        <button
+                          onClick={() => changeQuantity(menu.id, +1)}
+                          className="w-7 h-7 rounded-full bg-[#faf5ee] text-[#5c3d1e] font-bold text-sm flex items-center justify-center active:scale-90 transition-transform"
+                        >
+                          +
+                        </button>
+                        <button
+                          onClick={() => addToCart(menu)}
+                          className="px-3 py-1.5 rounded-xl bg-[#e07640] text-white text-sm font-semibold shadow-sm active:scale-95 transition-transform"
+                        >
+                          담기
+                        </button>
+                      </div>
+                    </div>
+
+                    {cartItems.length > 0 && (
+                      <div className="border-t border-[#faf5ee] px-4 py-2 flex items-center justify-between bg-orange-50">
+                        <span className="text-xs text-[#e07640] font-semibold">
+                          ✓ 장바구니 {cartItems[0].quantity}개
+                        </span>
+                        <button
+                          onClick={() => removeFromCart(menu.id)}
+                          className="text-xs text-gray-400"
+                        >
+                          취소
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+        <div className="h-4" />
       </div>
 
+      {/* ── 세트 선택 모달 ── */}
+      {activeSet && (
+        <div
+          className="fixed inset-0 z-50 flex items-end bg-black/60"
+          onClick={() => setActiveSet(null)}
+        >
+          <div
+            className="bg-[#faf5ee] w-full rounded-t-3xl flex flex-col max-h-[88vh] overflow-hidden"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex justify-center pt-3 pb-1">
+              <div className="w-10 h-1 rounded-full bg-[#d4a87a]/40" />
+            </div>
+
+            <div className="overflow-y-auto px-6 pb-8 flex flex-col gap-5">
+              <div className="flex justify-between items-start pt-2">
+                <div>
+                  <span className="text-xs bg-[#e07640] text-white px-2 py-0.5 rounded-full font-semibold">세트</span>
+                  <h2 className="font-bold text-xl text-[#1c1208] mt-1.5">{activeSet.name}</h2>
+                  <p className="text-[#e07640] font-bold text-lg">{activeSet.price.toLocaleString()}원</p>
+                </div>
+                <button
+                  onClick={() => setActiveSet(null)}
+                  className="w-8 h-8 rounded-full bg-[#e8d9c5] text-[#5c3d1e] flex items-center justify-center text-lg font-medium mt-1"
+                >
+                  ×
+                </button>
+              </div>
+
+              {(setGroups[activeSet.id] ?? []).map(g => (
+                <div key={g.id}>
+                  <div className="flex items-center gap-2 mb-3">
+                    <p className="font-semibold text-sm text-[#1c1208]">{g.name}</p>
+                    {isChoiceGroup(g) && (
+                      <span className="text-xs bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded-full font-medium">
+                        {g.min_select}개 선택
+                      </span>
+                    )}
+                  </div>
+
+                  {isChoiceGroup(g) ? (
+                    <div className="flex flex-col gap-2">
+                      {g.items.map(item => {
+                        const selected = (groupSelections[g.id] ?? []).includes(item.id)
+                        return (
+                          <button
+                            key={item.id}
+                            onClick={() => toggleSelection(g.id, item.id, g.max_select)}
+                            className={`flex items-center gap-3 px-4 py-3.5 rounded-2xl border-2 transition-all text-left active:scale-[0.98]
+                              ${selected
+                                ? 'border-[#e07640] bg-orange-50'
+                                : 'border-[#e8d9c5] bg-white'}`}
+                          >
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all
+                              ${selected ? 'border-[#e07640] bg-[#e07640]' : 'border-[#c4a07a]'}`}>
+                              {selected && <div className="w-2 h-2 rounded-full bg-white" />}
+                            </div>
+                            <span className={`font-medium text-sm ${selected ? 'text-[#e07640]' : 'text-[#1c1208]'}`}>
+                              {item.name}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <div className="bg-white rounded-2xl border border-[#e8d9c5] px-4 py-3 flex flex-col gap-2">
+                      {g.items.map(item => (
+                        <div key={item.id} className="flex items-center gap-2 text-sm text-[#5c3d1e]">
+                          <span className="text-amber-400">✦</span>
+                          <span>{item.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              <div className="flex items-center justify-center gap-5 py-2">
+                <button
+                  onClick={() => setSetQty(q => Math.max(1, q - 1))}
+                  className="w-10 h-10 rounded-full bg-[#e8d9c5] text-[#5c3d1e] font-bold text-xl flex items-center justify-center active:scale-90 transition-transform"
+                >
+                  −
+                </button>
+                <span className="font-bold text-xl text-[#1c1208] w-8 text-center">{setQty}</span>
+                <button
+                  onClick={() => setSetQty(q => q + 1)}
+                  className="w-10 h-10 rounded-full bg-[#e8d9c5] text-[#5c3d1e] font-bold text-xl flex items-center justify-center active:scale-90 transition-transform"
+                >
+                  +
+                </button>
+              </div>
+
+              <button
+                onClick={addSetToCart}
+                disabled={!isSelectionComplete()}
+                className="w-full py-4 bg-[#e07640] text-white rounded-2xl font-bold text-base shadow-md disabled:opacity-40 active:scale-95 transition-all"
+              >
+                {isSelectionComplete()
+                  ? `장바구니에 담기 · ${(activeSet.price * setQty).toLocaleString()}원`
+                  : '메뉴를 선택해주세요'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 주문하기 버튼 */}
       {cartCount > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t">
+        <div className="fixed bottom-0 left-0 right-0 px-4 pb-6 pt-3 bg-gradient-to-t from-[#faf5ee] via-[#faf5ee] to-transparent">
           <button
             onClick={goToPayment}
-            className="w-full py-4 bg-[#189ad3] text-white rounded-xl font-bold text-base flex justify-between items-center px-5"
+            className="w-full py-4 bg-[#1c1208] text-amber-50 rounded-2xl font-bold text-base flex justify-between items-center px-5 shadow-xl active:scale-[0.98] transition-transform"
           >
-            <span className="bg-[#189ad3] rounded-full px-2 py-0.5 text-sm">
+            <span className="bg-[#e07640] rounded-full px-2.5 py-0.5 text-sm text-white font-bold">
               {cartCount}
             </span>
             <span>주문하기</span>
-            <span>{totalPrice.toLocaleString()}원</span>
+            <span className="text-amber-300 font-bold">{totalPrice.toLocaleString()}원</span>
           </button>
         </div>
       )}

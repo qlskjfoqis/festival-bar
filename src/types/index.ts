@@ -1,6 +1,7 @@
 export type Menu = {
   id: number
   name: string
+  admin_name: string | null
   price: number
   category: string
   is_available: boolean
@@ -10,6 +11,7 @@ export type Menu = {
 export type OrderItem = {
   menu_id: number
   name: string
+  admin_name?: string
   price: number
   quantity: number
 }
@@ -19,6 +21,7 @@ export type Order = {
   table_number: number
   items: OrderItem[]
   total_price: number
+  person_count: number
   status: 'pending' | 'confirmed'
   created_at: string
   receipt_url?: string
