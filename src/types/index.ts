@@ -2,6 +2,7 @@ export type Menu = {
   id: number
   name: string
   admin_name: string | null
+  description: string | null
   price: number
   category: string
   is_available: boolean

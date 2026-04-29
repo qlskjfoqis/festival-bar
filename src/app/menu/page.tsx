@@ -32,6 +32,9 @@ function MenuContent() {
   const [groupSelections, setGroupSelections] = useState<Record<number, number[]>>({})
   const [setQty, setSetQty] = useState(1)
 
+  const [activeCategory, setActiveCategory] = useState('전체')
+  const [activeDesc, setActiveDesc] = useState<Menu | null>(null)
+
   useEffect(() => {
     const saved = sessionStorage.getItem('personCount')
     if (saved) setPersonCount(Number(saved))
@@ -71,7 +74,6 @@ function MenuContent() {
   }
 
   const goAdditionalOrder = () => {
-    // personCount=0 → 추가 주문 (테이블비 없음)
     sessionStorage.setItem('personCount', '0')
     setPersonCount(0)
   }
@@ -197,8 +199,13 @@ function MenuContent() {
   const isSetMenu = (menuId: number) => menuId in setGroups
   const isAdditionalOrder = personCount === 0
 
-  // 카테고리별 그룹핑 (Supabase order 순서 유지)
-  const categoryOrder = Array.from(new Set(menus.map(m => m.category)))
+  // 세트를 맨 앞으로
+  const rawCategoryOrder = Array.from(new Set(menus.map(m => m.category)))
+  const categoryOrder = [
+    ...rawCategoryOrder.filter(c => c === '세트'),
+    ...rawCategoryOrder.filter(c => c !== '세트'),
+  ]
+
   const menusByCategory = categoryOrder.map(cat => {
     const items = menus.filter(m => m.category === cat)
     const sorted = cat === '세트'
@@ -206,6 +213,10 @@ function MenuContent() {
       : [...items].sort((a, b) => b.price - a.price)
     return { category: cat, items: sorted }
   })
+
+  const visibleCategories = activeCategory === '전체'
+    ? menusByCategory
+    : menusByCategory.filter(({ category }) => category === activeCategory)
 
   const goToPayment = () => {
     sessionStorage.setItem('cart', JSON.stringify(cart))
@@ -224,10 +235,9 @@ function MenuContent() {
             <p className="text-amber-300/60 text-sm mt-1">{tableNumber}번 테이블에 오신 걸 환영해요</p>
           </div>
 
-          {/* 일반 주문 */}
           <div className="bg-[#faf5ee] rounded-3xl p-6 w-full flex flex-col gap-5">
             <p className="text-sm font-semibold text-[#5c3d1e] text-center">
-              인원수를 선택해주세요
+              인원수를 선택해주세요.
             </p>
             <div className="grid grid-cols-4 gap-2">
               {[1, 2, 3, 4, 5, 6, 7, 8].map(n => (
@@ -262,7 +272,6 @@ function MenuContent() {
             </button>
           </div>
 
-          {/* 추가 주문 */}
           <div className="w-full flex flex-col items-center gap-2">
             <div className="flex items-center gap-3 w-full">
               <div className="flex-1 h-px bg-amber-200/20" />
@@ -287,9 +296,9 @@ function MenuContent() {
   // ── 메뉴 화면 ──────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-[#faf5ee]">
-      {/* 헤더 */}
-      <div className="bg-[#1c1208] sticky top-0 z-10 px-4 pt-4 pb-3">
-        <div className="flex justify-between items-start">
+      {/* 헤더 + 카테고리 탭 */}
+      <div className="bg-[#1c1208] sticky top-0 z-10">
+        <div className="px-4 pt-4 pb-3 flex justify-between items-start">
           <div>
             <h1 className="font-bold text-lg text-amber-50 tracking-tight">🏮 게스트하우스융</h1>
             <p className="text-xs text-amber-300/50 mt-0.5">
@@ -306,25 +315,42 @@ function MenuContent() {
             {isAdditionalOrder ? '처음으로' : '인원 변경'}
           </button>
         </div>
+
+        {/* 카테고리 탭 */}
+        <div className="flex overflow-x-auto border-t border-white/5" style={{ scrollbarWidth: 'none' }}>
+          {['전체', ...categoryOrder].map(cat => (
+            <button
+              key={cat}
+              onClick={() => setActiveCategory(cat)}
+              className={`px-5 py-2.5 text-sm font-semibold whitespace-nowrap transition-all border-b-2
+                ${activeCategory === cat
+                  ? 'text-amber-50 border-[#e07640]'
+                  : 'text-amber-300/40 border-transparent'}`}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* 카테고리별 메뉴 */}
       <div className="pb-36">
-        {menusByCategory.map(({ category, items }, sectionIdx) => (
+        {visibleCategories.map(({ category, items }, sectionIdx) => (
           <div key={category}>
-            {/* 섹션 헤더 */}
-            <div className={`px-4 pt-6 pb-3 ${sectionIdx > 0 ? 'mt-2' : ''}`}>
-              <div className="flex items-center gap-3">
-                <span className="font-bold text-base text-[#1c1208]">{category}</span>
-                <div className="flex-1 h-px bg-[#d4a87a]/30" />
+            {activeCategory === '전체' ? (
+              <div className={`px-4 pt-6 pb-3 ${sectionIdx > 0 ? 'mt-2' : ''}`}>
+                <div className="flex items-center gap-3">
+                  <span className="font-bold text-base text-[#1c1208]">{category}</span>
+                  <div className="flex-1 h-px bg-[#d4a87a]/30" />
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="h-5" />
+            )}
 
-            {/* 메뉴 카드 목록 */}
             <div className="px-4 flex flex-col gap-2">
               {items.map(menu => {
                 const cartItems = cart.filter(i => i.menu_id === menu.id)
-                const qty = getQuantity(menu.id)
                 const isSet = isSetMenu(menu.id)
                 const groups = setGroups[menu.id] ?? []
 
@@ -353,21 +379,15 @@ function MenuContent() {
                                     <span className="bg-amber-200 text-amber-800 rounded px-1 py-0.5 font-semibold shrink-0 leading-relaxed">
                                       택1
                                     </span>
-                                    <span className="leading-relaxed flex flex-col">
-                                      {g.items.map((i, idx) => (
-                                        <span key={i.id}>
-                                          {i.name}{idx < g.items.length - 1 ? ' 또는' : ''}
-                                        </span>
-                                      ))}
+                                    <span className="leading-relaxed">
+                                      {g.items.map(i => i.name).join(' 또는 ')}
                                     </span>
                                   </>
                                 ) : (
                                   <>
                                     <span className="text-amber-500 mt-0.5 shrink-0">✦</span>
-                                    <span className="leading-relaxed flex flex-col">
-                                      {g.items.map(i => (
-                                        <span key={i.id}>{i.name}</span>
-                                      ))}
+                                    <span className="leading-relaxed flex flex-col gap-0.5">
+                                      {g.items.map(i => <span key={i.id}>{i.name}</span>)}
                                     </span>
                                   </>
                                 )}
@@ -406,34 +426,19 @@ function MenuContent() {
 
                 return (
                   <div key={menu.id} className="bg-white rounded-2xl shadow-sm overflow-hidden">
-                    <div className="px-4 py-3.5 flex items-center justify-between gap-3">
+                    <div className="px-4 py-3.5 flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
                         <p className="font-medium text-sm text-[#1c1208] leading-snug">{menu.name}</p>
                         <p className="text-[#e07640] font-bold text-sm mt-0.5">
                           {menu.price.toLocaleString()}원
                         </p>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          onClick={() => changeQuantity(menu.id, -1)}
-                          className="w-7 h-7 rounded-full bg-[#faf5ee] text-[#5c3d1e] font-bold text-sm flex items-center justify-center active:scale-90 transition-transform"
-                        >
-                          −
-                        </button>
-                        <span className="font-bold text-sm w-4 text-center text-[#1c1208]">{qty}</span>
-                        <button
-                          onClick={() => changeQuantity(menu.id, +1)}
-                          className="w-7 h-7 rounded-full bg-[#faf5ee] text-[#5c3d1e] font-bold text-sm flex items-center justify-center active:scale-90 transition-transform"
-                        >
-                          +
-                        </button>
-                        <button
-                          onClick={() => addToCart(menu)}
-                          className="px-3 py-1.5 rounded-xl bg-[#e07640] text-white text-sm font-semibold shadow-sm active:scale-95 transition-transform"
-                        >
-                          담기
-                        </button>
-                      </div>
+                      <button
+                        onClick={() => setActiveDesc(menu)}
+                        className="px-3 py-2 rounded-xl bg-[#e07640] text-white text-sm font-semibold shrink-0 shadow-sm active:scale-95 transition-transform"
+                      >
+                        선택
+                      </button>
                     </div>
 
                     {cartItems.length > 0 && (
@@ -560,6 +565,78 @@ function MenuContent() {
                   ? `장바구니에 담기 · ${(activeSet.price * setQty).toLocaleString()}원`
                   : '메뉴를 선택해주세요'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 메뉴 설명 모달 ── */}
+      {activeDesc && (
+        <div
+          className="fixed inset-0 z-50 flex items-end bg-black/60"
+          onClick={() => setActiveDesc(null)}
+        >
+          <div
+            className="bg-[#faf5ee] w-full rounded-t-3xl flex flex-col max-h-[85vh] overflow-hidden"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex justify-center pt-3 pb-2">
+              <div className="w-10 h-1 rounded-full bg-[#d4a87a]/40" />
+            </div>
+
+            <div className="overflow-y-auto flex flex-col">
+              {/* 메뉴명 + 가격 헤더 */}
+              <div className="px-6 pt-2 pb-4 flex justify-between items-start border-b border-[#e8d9c5]">
+                <div>
+                  <p className="font-black text-2xl text-[#1c1208] leading-tight">{activeDesc.name}</p>
+                  <p className="text-[#e07640] font-bold text-xl mt-1">
+                    {activeDesc.price.toLocaleString()}원
+                  </p>
+                </div>
+                <button
+                  onClick={() => setActiveDesc(null)}
+                  className="w-8 h-8 rounded-full bg-[#e8d9c5] text-[#5c3d1e] flex items-center justify-center text-lg font-medium mt-1 shrink-0"
+                >
+                  ×
+                </button>
+              </div>
+
+              {/* 설명 */}
+              {activeDesc.description && (
+                <div className="px-6 py-5">
+                  <p className="text-base text-[#3d2410] leading-loose tracking-wide whitespace-pre-line">
+                    {activeDesc.description}
+                  </p>
+                </div>
+              )}
+
+              {/* 수량 + 담기 버튼 */}
+              <div className="px-6 pb-8 pt-2 flex flex-col gap-4 border-t border-[#e8d9c5]">
+                <div className="flex items-center justify-center gap-6 py-2">
+                  <button
+                    onClick={() => changeQuantity(activeDesc.id, -1)}
+                    className="w-11 h-11 rounded-full bg-[#e8d9c5] text-[#5c3d1e] font-bold text-2xl flex items-center justify-center active:scale-90 transition-transform"
+                  >
+                    −
+                  </button>
+                  <span className="font-black text-2xl text-[#1c1208] w-10 text-center">
+                    {getQuantity(activeDesc.id)}
+                  </span>
+                  <button
+                    onClick={() => changeQuantity(activeDesc.id, +1)}
+                    className="w-11 h-11 rounded-full bg-[#e8d9c5] text-[#5c3d1e] font-bold text-2xl flex items-center justify-center active:scale-90 transition-transform"
+                  >
+                    +
+                  </button>
+                </div>
+
+                <button
+                  onClick={() => { addToCart(activeDesc); setActiveDesc(null) }}
+                  className="w-full py-4 bg-[#e07640] text-white rounded-2xl font-bold text-base shadow-md active:scale-95 transition-all"
+                >
+                  장바구니에 담기 · {(activeDesc.price * getQuantity(activeDesc.id)).toLocaleString()}원
+                </button>
+              </div>
             </div>
           </div>
         </div>
