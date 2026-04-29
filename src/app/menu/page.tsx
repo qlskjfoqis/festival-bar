@@ -34,6 +34,7 @@ function MenuContent() {
 
   const [activeCategory, setActiveCategory] = useState('전체')
   const [activeDesc, setActiveDesc] = useState<Menu | null>(null)
+  const [toast, setToast] = useState<string | null>(null)
 
   useEffect(() => {
     const saved = sessionStorage.getItem('personCount')
@@ -196,6 +197,8 @@ function MenuContent() {
 
   const totalPrice = cart.reduce((sum, i) => sum + i.price * i.quantity, 0)
   const cartCount = cart.reduce((sum, i) => sum + i.quantity, 0)
+  const MIN_ORDER = 15000
+  const meetsMinOrder = totalPrice >= MIN_ORDER
   const isSetMenu = (menuId: number) => menuId in setGroups
   const isAdditionalOrder = personCount === 0
 
@@ -218,7 +221,16 @@ function MenuContent() {
     ? menusByCategory
     : menusByCategory.filter(({ category }) => category === activeCategory)
 
+  const showToast = (msg: string) => {
+    setToast(msg)
+    setTimeout(() => setToast(null), 2500)
+  }
+
   const goToPayment = () => {
+    if (!meetsMinOrder) {
+      showToast(`최소 주문금액은 15,000원이에요 🙏\n아직 ${(MIN_ORDER - totalPrice).toLocaleString()}원이 부족해요!`)
+      return
+    }
     sessionStorage.setItem('cart', JSON.stringify(cart))
     sessionStorage.setItem('tableNumber', String(tableNumber))
     router.push('/order')
@@ -642,9 +654,20 @@ function MenuContent() {
         </div>
       )}
 
+      {/* 토스트 */}
+      {toast && (
+        <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-sm">
+          <div className="bg-[#1c1208] text-amber-50 rounded-2xl px-5 py-4 shadow-2xl text-center animate-fade-in">
+            {toast.split('\n').map((line, i) => (
+              <p key={i} className={i === 0 ? 'font-bold text-sm' : 'text-xs text-amber-300/70 mt-1'}>{line}</p>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* 주문하기 버튼 */}
       {cartCount > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 px-4 pb-6 pt-3 bg-gradient-to-t from-[#faf5ee] via-[#faf5ee] to-transparent">
+        <div className="fixed bottom-0 left-0 right-0 px-4 pb-6 pt-3 bg-linear-to-t from-[#faf5ee] via-[#faf5ee] to-transparent">
           <button
             onClick={goToPayment}
             className="w-full py-4 bg-[#1c1208] text-amber-50 rounded-2xl font-bold text-base flex justify-between items-center px-5 shadow-xl active:scale-[0.98] transition-transform"
