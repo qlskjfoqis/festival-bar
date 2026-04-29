@@ -120,7 +120,11 @@ export default function AdminPage() {
     return nameById[item.menu_id] || item.name
   }
 
+  const TABLE_FEE_PER_PERSON = 1000
   const totalRevenue = confirmed.reduce((s, o) => s + o.total_price, 0)
+  const totalTableFee = confirmed.reduce((s, o) => s + (o.person_count > 0 ? o.person_count * TABLE_FEE_PER_PERSON : 0), 0)
+  const totalMenuRevenue = totalRevenue - totalTableFee
+
   const menuStats = confirmed
     .flatMap(o => o.items)
     .reduce((acc, item) => {
@@ -384,6 +388,10 @@ export default function AdminPage() {
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-base text-black">{order.table_number}번</span>
                       <span className="text-xs text-gray-400">{formatTime(order.created_at)}</span>
+                      {order.person_count === 0
+                        ? <span className="text-xs bg-blue-50 text-blue-400 px-2 py-0.5 rounded-full">추가</span>
+                        : <span className="text-xs text-gray-400">{order.person_count}명</span>
+                      }
                       <span className="text-xs bg-green-50 text-green-500 px-2 py-0.5 rounded-full">완료</span>
                     </div>
                     <div className="flex items-center gap-2">
@@ -434,6 +442,16 @@ export default function AdminPage() {
               </p>
               <p className="text-4xl font-black text-[#189ad3]">{totalRevenue.toLocaleString()}원</p>
               <p className="text-sm text-gray-400 mt-2">완료 {confirmed.length}건 · 대기중 {pending.length}건</p>
+              <div className="mt-4 pt-4 border-t border-gray-100 flex flex-col gap-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-gray-400">메뉴 매출</span>
+                  <span className="text-sm font-bold text-gray-700">{totalMenuRevenue.toLocaleString()}원</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-gray-400">테이블비</span>
+                  <span className="text-sm font-bold text-gray-700">{totalTableFee.toLocaleString()}원</span>
+                </div>
+              </div>
             </div>
 
             {selectedDay === '전체' && (
