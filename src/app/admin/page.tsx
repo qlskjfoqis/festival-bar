@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import * as XLSX from 'xlsx'
 import { supabase } from '@/lib/supabase'
 import type { Order, OrderItem } from '@/types'
 
@@ -150,6 +151,64 @@ export default function AdminPage() {
     await supabase.from('orders').delete().eq('id', deleteTarget.id)
     setOrders(prev => prev.filter(o => o.id !== deleteTarget.id))
     setDeleteTarget(null)
+  }
+
+  const downloadExcel = () => {
+    const period = selectedDay === '전체' ? '전체기간' : selectedDay
+
+    // 메뉴별 수량 + 매출 계산
+    const menuData: Record<string, { qty: number; revenue: number }> = {}
+    fullyConfirmed.forEach(o => {
+      o.items.forEach(item => {
+        const name = getAdminName(item)
+        if (!menuData[name]) menuData[name] = { qty: 0, revenue: 0 }
+        menuData[name].qty += item.quantity
+        menuData[name].revenue += item.price * item.quantity
+      })
+    })
+    const menuSorted = Object.entries(menuData).sort((a, b) => b[1].qty - a[1].qty)
+    const totalQty = menuSorted.reduce((s, [, { qty }]) => s + qty, 0)
+
+    const rows: (string | number)[][] = []
+
+    // 헤더
+    rows.push(['게스트하우스융 정산 리포트'])
+    rows.push([`기간: ${period}`])
+    rows.push([])
+
+    // 매출 요약
+    rows.push(['▣ 매출 요약'])
+    rows.push(['총 매출', totalRevenue])
+    rows.push(['  메뉴 매출', totalMenuRevenue])
+    rows.push(['  테이블비', totalTableFee])
+    rows.push(['완료 건수', `${confirmed.length}건`])
+    rows.push([])
+
+    // 날짜별 매출 (전체 기간일 때만)
+    if (selectedDay === '전체') {
+      rows.push(['▣ 날짜별 매출'])
+      rows.push(['날짜', '완료 건수', '매출'])
+      dayOptions.filter(d => d !== '전체').forEach(day => {
+        const dayOrders = orders.filter(o => o.status === 'confirmed' && formatDate(o.created_at) === day)
+        rows.push([day, dayOrders.length, dayOrders.reduce((s, o) => s + o.total_price, 0)])
+      })
+      rows.push([])
+    }
+
+    // 메뉴별 판매량
+    rows.push(['▣ 메뉴별 판매량 (많이 팔린 순)'])
+    rows.push(['순위', '메뉴명', '판매 수량', '매출'])
+    menuSorted.forEach(([name, { qty, revenue }], i) => {
+      rows.push([i + 1, name, qty, revenue])
+    })
+    rows.push(['합계', '', totalQty, totalMenuRevenue])
+
+    const ws = XLSX.utils.aoa_to_sheet(rows)
+    ws['!cols'] = [{ wch: 16 }, { wch: 32 }, { wch: 12 }, { wch: 16 }]
+
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, '정산 리포트')
+    XLSX.writeFile(wb, `게스트하우스융_${period}.xlsx`)
   }
 
   const tabs = [
@@ -463,19 +522,19 @@ export default function AdminPage() {
                           onClick={() => setExpandedId(expandedId === order.id ? null : order.id)}
                           className="flex-1 px-4 py-3.5 flex justify-between items-center"
                         >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="font-bold text-sm text-gray-900 shrink-0">{order.table_number}번</span>
-                            <span className="text-xs text-gray-400 shrink-0">{formatTime(order.created_at)}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-sm text-gray-900">{order.table_number}번</span>
+                            <span className="text-xs text-gray-400">{formatTime(order.created_at)}</span>
                             {order.person_count === 0
-                              ? <span className="text-xs bg-blue-50 text-blue-400 px-1.5 py-0.5 rounded-full shrink-0">추가</span>
-                              : <span className="text-xs text-gray-400 shrink-0">{order.person_count}명</span>
+                              ? <span className="text-xs bg-blue-50 text-blue-400 px-1.5 py-0.5 rounded-full">추가</span>
+                              : <span className="text-xs text-gray-400">{order.person_count}명</span>
                             }
-                            <span className="text-xs text-gray-400 truncate hidden sm:block">
-                              {order.items.map(i => getAdminName(i)).join(' · ')}
+                            <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-medium">
+                              {order.items.reduce((s, i) => s + i.quantity, 0)}개
                             </span>
                           </div>
-                          <div className="flex items-center gap-2 shrink-0 ml-2">
-                            <span className="font-bold text-sm text-gray-600">{order.total_price.toLocaleString()}원</span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="font-bold text-sm text-gray-700">{order.total_price.toLocaleString()}원</span>
                             <span className="text-gray-300 text-xs">{expandedId === order.id ? '▲' : '▼'}</span>
                           </div>
                         </button>
@@ -509,9 +568,17 @@ export default function AdminPage() {
         {activeTab === 'stats' && (
           <>
             <div className="bg-white rounded-2xl p-5">
-              <p className="text-sm text-gray-400 mb-1">
-                총 매출 ({selectedDay === '전체' ? '전체 기간' : selectedDay} · 입금 확인 기준)
-              </p>
+              <div className="flex justify-between items-start mb-1">
+                <p className="text-sm text-gray-400">
+                  총 매출 ({selectedDay === '전체' ? '전체 기간' : selectedDay} · 입금 확인 기준)
+                </p>
+                <button
+                  onClick={downloadExcel}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-100 hover:bg-sky-200 active:scale-95 text-sky-600 rounded-xl text-xs font-semibold transition"
+                >
+                  📥 엑셀
+                </button>
+              </div>
               <p className="text-4xl font-black text-[#189ad3]">{totalRevenue.toLocaleString()}원</p>
               <p className="text-sm text-gray-400 mt-2">완료 {confirmed.length}건 · 대기중 {pending.length}건</p>
               <div className="mt-4 pt-4 border-t border-gray-100 flex flex-col gap-2">

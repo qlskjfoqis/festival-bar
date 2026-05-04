@@ -367,6 +367,14 @@ function MenuContent() {
                 const groups = setGroups[menu.id] ?? []
 
                 if (isSet) {
+                  const originalPrice = groups.reduce((total, g) => {
+                    if (!isChoiceGroup(g)) return total + g.items.reduce((s, i) => s + i.price, 0)
+                    return total + Math.min(...g.items.map(i => i.price))
+                  }, 0)
+                  const discountRate = originalPrice > menu.price
+                    ? Math.round((1 - menu.price / originalPrice) * 100)
+                    : 0
+
                   return (
                     <div
                       key={menu.id}
@@ -380,9 +388,21 @@ function MenuContent() {
                             </span>
                             <span className="font-bold text-base text-[#1c1208]">{menu.name}</span>
                           </div>
-                          <p className="text-[#e07640] font-bold text-base mb-2">
-                            {menu.price.toLocaleString()}원
-                          </p>
+                          <div className="flex items-center gap-2 mb-2">
+                            <p className="text-[#e07640] font-bold text-base">
+                              {menu.price.toLocaleString()}원
+                            </p>
+                            {discountRate > 0 && (
+                              <>
+                                <p className="text-xs text-[#5c3d1e]/40 line-through">
+                                  {originalPrice.toLocaleString()}원
+                                </p>
+                                <span className="text-xs bg-[#e07640] text-white px-1.5 py-0.5 rounded-md font-bold">
+                                  {discountRate}% 할인
+                                </span>
+                              </>
+                            )}
+                          </div>
                           <div className="flex flex-col gap-1">
                             {groups.map(g => (
                               <div key={g.id} className="flex items-start gap-1.5 text-xs text-[#5c3d1e]/80">
