@@ -101,7 +101,7 @@ export default function AdminPage() {
   const dayOptions = ['전체', ...Array.from(new Set(orders.map(o => formatDate(o.created_at)))).reverse()]
   const filteredOrders = selectedDay === '전체' ? orders : orders.filter(o => formatDate(o.created_at) === selectedDay)
   const pending = filteredOrders.filter(o => o.status === 'pending')
-  const confirmed = filteredOrders.filter(o => o.status === 'confirmed')
+  const confirmed = filteredOrders.filter(o => o.status === 'payment_confirmed' || o.status === 'confirmed')
   // 주문 아이템을 admin_name 기준으로 표시
   // 1순위: 주문에 저장된 admin_name (새 주문)
   // 2순위: menu_id로 menus 테이블 조회 (기존 주문 일반 메뉴)
@@ -121,11 +121,12 @@ export default function AdminPage() {
   }
 
   const TABLE_FEE_PER_PERSON = 1000
+  const fullyConfirmed = filteredOrders.filter(o => o.status === 'confirmed')
   const totalRevenue = confirmed.reduce((s, o) => s + o.total_price, 0)
   const totalTableFee = confirmed.reduce((s, o) => s + (o.person_count > 0 ? o.person_count * TABLE_FEE_PER_PERSON : 0), 0)
   const totalMenuRevenue = totalRevenue - totalTableFee
 
-  const menuStats = confirmed
+  const menuStats = fullyConfirmed
     .flatMap(o => o.items)
     .reduce((acc, item) => {
       const key = getAdminName(item)
@@ -133,6 +134,11 @@ export default function AdminPage() {
       return acc
     }, {} as Record<string, number>)
   const menuStatsSorted = Object.entries(menuStats).sort((a, b) => b[1] - a[1])
+
+  const confirmPayment = async (id: number) => {
+    await supabase.from('orders').update({ status: 'payment_confirmed' }).eq('id', id)
+    setOrders(prev => prev.map(o => o.id === id ? { ...o, status: 'payment_confirmed' } : o))
+  }
 
   const confirmOrder = async (id: number) => {
     await supabase.from('orders').update({ status: 'confirmed' }).eq('id', id)
@@ -353,16 +359,16 @@ export default function AdminPage() {
                       </div>
                     )}
 
-                    {/* 금액 + 접수 버튼 */}
+                    {/* 금액 + 입금 확인 버튼 */}
                     <div className="flex items-center gap-3">
                       <span className="text-xl font-black text-gray-800">
                         {order.total_price.toLocaleString()}원
                       </span>
                       <button
-                        onClick={() => confirmOrder(order.id)}
+                        onClick={() => confirmPayment(order.id)}
                         className="flex-1 py-3.5 bg-[#189ad3] hover:bg-[#1588bb] active:scale-95 text-white rounded-xl font-bold text-base transition"
                       >
-                        ✓ 접수 완료
+                        💰 입금 확인
                       </button>
                     </div>
                   </div>
@@ -376,60 +382,126 @@ export default function AdminPage() {
         {activeTab === 'confirmed' && (
           <>
             {confirmed.length === 0 && (
-              <div className="text-center py-12 text-gray-400">완료된 주문이 없어요</div>
+              <div className="text-center py-16">
+                <div className="text-4xl mb-3">📋</div>
+                <p className="font-semibold text-gray-500">완료된 주문이 없어요</p>
+              </div>
             )}
-            {confirmed.map(order => (
-              <div key={order.id} className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-                <div className="flex items-center">
-                  <button
-                    onClick={() => setExpandedId(expandedId === order.id ? null : order.id)}
-                    className="flex-1 px-4 py-3.5 flex justify-between items-center"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-base text-black">{order.table_number}번</span>
-                      <span className="text-xs text-gray-400">{formatTime(order.created_at)}</span>
+
+            {/* 칠판 기재 대기 */}
+            {confirmed.filter(o => o.status === 'payment_confirmed').map(order => (
+              <div key={order.id} className="bg-sky-50 rounded-2xl overflow-hidden shadow-sm ring-2 ring-[#189ad3]">
+                {/* 테이블 번호 + 금액 */}
+                <div className="px-5 pt-5 pb-4 flex justify-between items-start">
+                  <div>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-5xl font-black text-gray-900 leading-none">{order.table_number}</span>
+                      <span className="text-2xl font-black text-gray-600 leading-none">번</span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-2.5">
                       {order.person_count === 0
-                        ? <span className="text-xs bg-blue-50 text-blue-400 px-2 py-0.5 rounded-full">추가</span>
-                        : <span className="text-xs text-gray-400">{order.person_count}명</span>
+                        ? <span className="text-xs bg-blue-50 text-blue-400 px-2.5 py-1 rounded-full font-medium">추가주문</span>
+                        : <span className="text-xs bg-gray-100 text-gray-500 px-2.5 py-1 rounded-full font-medium flex items-center gap-1">
+                            👤 {order.person_count}명
+                          </span>
                       }
-                      <span className="text-xs bg-green-50 text-green-500 px-2 py-0.5 rounded-full">완료</span>
+                      <span className="text-xs bg-gray-100 text-gray-500 px-2.5 py-1 rounded-full font-medium flex items-center gap-1">
+                        🕐 {formatTime(order.created_at)}
+                      </span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-[#189ad3]">{order.total_price.toLocaleString()}원</span>
-                      <span className="text-gray-300 text-xs">{expandedId === order.id ? '▲' : '▼'}</span>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => setDeleteTarget(order)}
-                    className="pr-4 text-gray-400 hover:text-red-400 transition text-xl"
-                  >
-                    🗑
-                  </button>
+                  </div>
+                  <div className="flex flex-col items-end gap-2">
+                    <button
+                      onClick={() => setDeleteTarget(order)}
+                      className="w-8 h-8 rounded-xl bg-gray-400/20 hover:bg-red-100 text-gray-500 hover:text-red-400 transition flex items-center justify-center text-sm"
+                    >
+                      🗑
+                    </button>
+                    <span className="text-xl font-black text-[#189ad3]">{order.total_price.toLocaleString()}원</span>
+                  </div>
                 </div>
 
-                {expandedId === order.id && (
-                  <div className="px-4 pb-4 pt-3 border-t bg-gray-50">
-                    <div className="flex flex-wrap gap-2">
-                      {order.items.map((item, i) => (
-                        <div key={i} className="bg-white border border-gray-200 rounded-lg px-3 py-1.5 flex items-center gap-1.5">
-                          <span className="text-sm text-gray-700">{getAdminName(item)}</span>
-                          <span className="text-xs font-bold text-gray-400">×{item.quantity}</span>
-                        </div>
-                      ))}
+                {/* 구분선 */}
+                <div className="mx-5 border-t border-gray-100" />
+
+                {/* 메뉴 칩 */}
+                <div className="px-5 py-4 flex flex-wrap gap-2">
+                  {order.items.map((item, i) => (
+                    <div key={i} className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 flex items-center gap-2">
+                      <span className="text-sm font-semibold text-gray-800">{getAdminName(item)}</span>
+                      <span className="bg-[#189ad3] text-white text-xs font-black w-5 h-5 rounded-full flex items-center justify-center leading-none">{item.quantity}</span>
                     </div>
-                    {order.receipt_url && (
-                      <button onClick={() => setLightboxUrl(order.receipt_url!)} className="mt-3 w-full">
-                        <img
-                          src={order.receipt_url}
-                          alt="입금 캡처"
-                          className="w-full max-h-48 object-cover rounded-lg border border-gray-100"
-                        />
-                      </button>
-                    )}
-                  </div>
-                )}
+                  ))}
+                </div>
+
+                {/* 주문 확인 버튼 */}
+                <div className="px-5 pb-5">
+                  <button
+                    onClick={() => confirmOrder(order.id)}
+                    className="w-full py-4 rounded-2xl font-bold text-base text-white bg-[#189ad3] shadow-lg shadow-[#189ad3]/40 hover:bg-[#1588bb] hover:-translate-y-0.5 hover:shadow-xl hover:shadow-[#189ad3]/50 active:translate-y-0 active:scale-[0.98] transition-all duration-200 flex items-center justify-center gap-2"
+                  >
+                    ✓ 주문 확인
+                  </button>
+                </div>
               </div>
             ))}
+
+            {/* 완료된 주문 */}
+            {confirmed.filter(o => o.status === 'confirmed').length > 0 && (
+              <div>
+                <div className="flex items-center gap-2 px-1 mb-2">
+                  <span className="text-xs font-semibold text-gray-400">완료</span>
+                  <span className="text-xs bg-gray-100 text-gray-400 px-2 py-0.5 rounded-full font-bold">
+                    {confirmed.filter(o => o.status === 'confirmed').length}
+                  </span>
+                </div>
+                <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden divide-y divide-gray-50">
+                  {confirmed.filter(o => o.status === 'confirmed').map(order => (
+                    <div key={order.id}>
+                      <div className="flex items-center">
+                        <button
+                          onClick={() => setExpandedId(expandedId === order.id ? null : order.id)}
+                          className="flex-1 px-4 py-3.5 flex justify-between items-center"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="font-bold text-sm text-gray-900 shrink-0">{order.table_number}번</span>
+                            <span className="text-xs text-gray-400 shrink-0">{formatTime(order.created_at)}</span>
+                            {order.person_count === 0
+                              ? <span className="text-xs bg-blue-50 text-blue-400 px-1.5 py-0.5 rounded-full shrink-0">추가</span>
+                              : <span className="text-xs text-gray-400 shrink-0">{order.person_count}명</span>
+                            }
+                            <span className="text-xs text-gray-400 truncate hidden sm:block">
+                              {order.items.map(i => getAdminName(i)).join(' · ')}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0 ml-2">
+                            <span className="font-bold text-sm text-gray-600">{order.total_price.toLocaleString()}원</span>
+                            <span className="text-gray-300 text-xs">{expandedId === order.id ? '▲' : '▼'}</span>
+                          </div>
+                        </button>
+                        <button onClick={() => setDeleteTarget(order)} className="pr-4 text-gray-200 hover:text-red-400 transition text-sm">🗑</button>
+                      </div>
+
+                      {expandedId === order.id && (
+                        <div className="px-4 pb-3 pt-2 bg-gray-50 flex flex-wrap gap-1.5">
+                          {order.items.map((item, i) => (
+                            <div key={i} className="bg-white border border-gray-100 rounded-lg px-2.5 py-1 flex items-center gap-1">
+                              <span className="text-xs text-gray-700">{getAdminName(item)}</span>
+                              <span className="text-xs font-bold text-gray-400">×{item.quantity}</span>
+                            </div>
+                          ))}
+                          {order.receipt_url && (
+                            <button onClick={() => setLightboxUrl(order.receipt_url!)} className="w-full mt-2">
+                              <img src={order.receipt_url} alt="입금 캡처" className="w-full max-h-32 object-cover rounded-lg border border-gray-100" />
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         )}
 

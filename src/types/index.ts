@@ -23,7 +23,7 @@ export type Order = {
   items: OrderItem[]
   total_price: number
   person_count: number
-  status: 'pending' | 'confirmed'
+  status: 'pending' | 'payment_confirmed' | 'confirmed'
   created_at: string
   receipt_url?: string
 }
