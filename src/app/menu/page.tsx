@@ -198,7 +198,10 @@ function MenuContent() {
   const totalPrice = cart.reduce((sum, i) => sum + i.price * i.quantity, 0)
   const cartCount = cart.reduce((sum, i) => sum + i.quantity, 0)
   const MIN_ORDER = 15000
-  const meetsMinOrder = totalPrice >= MIN_ORDER
+  const menuCategoryMap = new Map(menus.map(m => [m.id, m.category]))
+  const nonEventTotal = cart.reduce((sum, i) =>
+    menuCategoryMap.get(i.menu_id) === '이벤트' ? sum : sum + i.price * i.quantity, 0)
+  const meetsMinOrder = nonEventTotal >= MIN_ORDER
   const isSetMenu = (menuId: number) => menuId in setGroups
   const isAdditionalOrder = personCount === 0
 
@@ -228,7 +231,7 @@ function MenuContent() {
 
   const goToPayment = () => {
     if (!meetsMinOrder) {
-      showToast(`최소 주문금액은 15,000원이에요 🙏\n아직 ${(MIN_ORDER - totalPrice).toLocaleString()}원이 부족해요!`)
+      showToast(`최소 주문금액은 이벤트 금액 제외 15,000원이에요 🙏\n아직 ${(MIN_ORDER - nonEventTotal).toLocaleString()}원이 부족해요!`)
       return
     }
     sessionStorage.setItem('cart', JSON.stringify(cart))
