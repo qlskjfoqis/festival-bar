@@ -25,7 +25,7 @@ function MenuContent() {
   const [cart, setCart] = useState<OrderItem[]>([])
   const [quantities, setQuantities] = useState<Record<number, number>>({})
   const [personCount, setPersonCount] = useState<number | null>(null)
-  const [selectedPerson, setSelectedPerson] = useState(1)
+  const [selectedPerson, setSelectedPerson] = useState(2)
 
   const [setGroups, setSetGroups] = useState<Record<number, SetGroup[]>>({})
   const [activeSet, setActiveSet] = useState<Menu | null>(null)
@@ -197,13 +197,16 @@ function MenuContent() {
 
   const totalPrice = cart.reduce((sum, i) => sum + i.price * i.quantity, 0)
   const cartCount = cart.reduce((sum, i) => sum + i.quantity, 0)
-  const MIN_ORDER = 15000
   const menuCategoryMap = new Map(menus.map(m => [m.id, m.category]))
-  const nonEventTotal = cart.reduce((sum, i) =>
-    menuCategoryMap.get(i.menu_id) === '이벤트' ? sum : sum + i.price * i.quantity, 0)
-  const meetsMinOrder = nonEventTotal >= MIN_ORDER
   const isSetMenu = (menuId: number) => menuId in setGroups
   const isAdditionalOrder = personCount === 0
+
+  const requiredMainCount = (!isAdditionalOrder && personCount) ? Math.ceil(personCount / 2) : 0
+  const mainMenuCount = cart.reduce((sum, i) => {
+    const cat = menuCategoryMap.get(i.menu_id) ?? ''
+    return cat === '메인' || cat === '메인메뉴' ? sum + i.quantity : sum
+  }, 0)
+  const meetsMinOrder = isAdditionalOrder || mainMenuCount >= requiredMainCount
 
   // 세트를 맨 앞으로
   const rawCategoryOrder = Array.from(new Set(menus.map(m => m.category)))
@@ -231,7 +234,8 @@ function MenuContent() {
 
   const goToPayment = () => {
     if (!meetsMinOrder) {
-      showToast(`최소 주문금액은 이벤트 금액 제외 15,000원이에요 🙏\n아직 ${(MIN_ORDER - nonEventTotal).toLocaleString()}원이 부족해요!`)
+      const needed = requiredMainCount - mainMenuCount
+      showToast(`2인당 메인메뉴 1개 이상 주문해주세요 🙏\n메인메뉴가 ${needed}개 더 필요해요!`)
       return
     }
     sessionStorage.setItem('cart', JSON.stringify(cart))
@@ -255,7 +259,7 @@ function MenuContent() {
               인원수를 선택해주세요.
             </p>
             <div className="grid grid-cols-4 gap-2">
-              {[1, 2, 3, 4, 5, 6, 7, 8].map(n => (
+              {[2, 3, 4, 5, 6, 7, 8, 9].map(n => (
                 <button
                   key={n}
                   onClick={() => setSelectedPerson(n)}
@@ -691,6 +695,22 @@ function MenuContent() {
       {/* 주문하기 버튼 */}
       {cartCount > 0 && (
         <div className="fixed bottom-0 left-0 right-0 px-4 pb-6 pt-3 bg-linear-to-t from-[#faf5ee] via-[#faf5ee] to-transparent">
+          {!isAdditionalOrder && requiredMainCount > 0 && (
+            <div className={`flex items-center justify-between px-4 py-2.5 rounded-xl mb-2 text-sm font-semibold
+              ${meetsMinOrder
+                ? 'bg-green-100 text-green-700'
+                : 'bg-amber-100 text-amber-800'}`}
+            >
+              <span>
+                {meetsMinOrder
+                  ? `✓ 메인메뉴 조건 충족`
+                  : `메인메뉴 ${requiredMainCount}개 이상 주문해주세요`}
+              </span>
+              <span className={`font-black ${meetsMinOrder ? 'text-green-600' : 'text-amber-700'}`}>
+                {mainMenuCount} / {requiredMainCount}
+              </span>
+            </div>
+          )}
           <button
             onClick={goToPayment}
             className="w-full py-4 bg-[#1c1208] text-amber-50 rounded-2xl font-bold text-base flex justify-between items-center px-5 shadow-xl active:scale-[0.98] transition-transform"
