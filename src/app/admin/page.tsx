@@ -36,11 +36,6 @@ export default function AdminPage() {
   const [nameByCustomer, setNameByCustomer] = useState<Record<string, string>>({})
 
   useEffect(() => {
-    const timer = setInterval(() => setOrders(prev => [...prev]), 30_000)
-    return () => clearInterval(timer)
-  }, [])
-
-  useEffect(() => {
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {})
     if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission()
 
@@ -94,9 +89,22 @@ export default function AdminPage() {
           )
         }
       })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders' }, (payload) => {
+        const updated = payload.new as Order
+        setOrders(prev => prev.map(o => o.id === updated.id ? updated : o))
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'orders' }, (payload) => {
+        setOrders(prev => prev.filter(o => o.id !== (payload.old as Order).id))
+      })
       .subscribe()
 
-    return () => { supabase.removeChannel(channel) }
+    // 실시간 연결이 끊겼을 때를 대비한 폴링 (30초마다)
+    const poll = setInterval(fetchOrders, 30_000)
+
+    return () => {
+      supabase.removeChannel(channel)
+      clearInterval(poll)
+    }
   }, [])
 
   const dayOptions = ['전체', ...Array.from(new Set(orders.map(o => formatDate(o.created_at)))).reverse()]
