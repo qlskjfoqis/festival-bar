@@ -201,10 +201,22 @@ function MenuContent() {
   const isSetMenu = (menuId: number) => menuId in setGroups
   const isAdditionalOrder = personCount === 0
 
-  const requiredMainCount = (!isAdditionalOrder && personCount) ? Math.ceil(personCount / 2) : 0
+  const requiredMainCount = (!isAdditionalOrder && personCount) ? Math.floor(personCount / 2) : 0
   const mainMenuCount = cart.reduce((sum, i) => {
     const cat = menuCategoryMap.get(i.menu_id) ?? ''
-    return cat === '메인' || cat === '메인메뉴' ? sum + i.quantity : sum
+    if (cat === '메인' || cat === '메인메뉴') return sum + i.quantity
+    if (isSetMenu(i.menu_id)) {
+      const groups = setGroups[i.menu_id] ?? []
+      const fixedMainCount = groups
+        .filter(g => !isChoiceGroup(g))
+        .flatMap(g => g.items)
+        .filter(item => {
+          const c = menuCategoryMap.get(item.id) ?? ''
+          return c === '메인' || c === '메인메뉴'
+        }).length
+      return sum + fixedMainCount * i.quantity
+    }
+    return sum
   }, 0)
   const meetsMinOrder = isAdditionalOrder || mainMenuCount >= requiredMainCount
 
@@ -374,14 +386,6 @@ function MenuContent() {
                 const groups = setGroups[menu.id] ?? []
 
                 if (isSet) {
-                  const originalPrice = groups.reduce((total, g) => {
-                    if (!isChoiceGroup(g)) return total + g.items.reduce((s, i) => s + i.price, 0)
-                    return total + Math.min(...g.items.map(i => i.price))
-                  }, 0)
-                  const discountRate = originalPrice > menu.price
-                    ? Math.round((1 - menu.price / originalPrice) * 100)
-                    : 0
-
                   return (
                     <div
                       key={menu.id}
@@ -399,16 +403,6 @@ function MenuContent() {
                             <p className="text-[#e07640] font-bold text-base">
                               {menu.price.toLocaleString()}원
                             </p>
-                            {discountRate > 0 && (
-                              <>
-                                <p className="text-xs text-[#5c3d1e]/40 line-through">
-                                  {originalPrice.toLocaleString()}원
-                                </p>
-                                <span className="text-xs bg-[#e07640] text-white px-1.5 py-0.5 rounded-md font-bold">
-                                  {discountRate}% 할인
-                                </span>
-                              </>
-                            )}
                           </div>
                           <div className="flex flex-col gap-1">
                             {groups.map(g => (
