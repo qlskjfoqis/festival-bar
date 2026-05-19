@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Select-String \"react|next\")",
+      "PowerShell(ls C:\\\\Users\\\\sehur\\\\festival-bar\\\\node_modules | Where-Object { $_.Name -match \"^react$|^next$|^@types\" } | Select-Object Name | head)",
+      "PowerShell(ls C:\\\\Users\\\\sehur\\\\festival-bar\\\\node_modules | Where-Object { $_.Name -eq \"react\" -or $_.Name -eq \"next\" -or $_.Name -eq \"@types\" } | Select-Object Name)",
+      "PowerShell(\\(ls C:\\\\Users\\\\sehur\\\\festival-bar\\\\node_modules | Measure-Object\\).Count)",
+      "Bash(npm install *)",
+      "Bash(npx next *)",
+      "Bash(npx tsc *)"
+    ]
+  }
+}

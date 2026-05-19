@@ -84,6 +84,19 @@ export default function OrderPage() {
         </p>
       </div>
 
+      {/* 자리 비움 안내 */}
+      <div className="mx-4 mt-4 bg-gradient-to-r from-[#e07640] to-[#c85a20] rounded-2xl px-4 py-4 shadow-md flex items-center gap-3">
+        <div className="bg-white/20 rounded-full w-12 h-12 flex items-center justify-center flex-shrink-0 text-2xl">
+          ⏰
+        </div>
+        <div>
+          <p className="font-black text-white text-base leading-tight">
+            30분 이상 자리 비움 시<br />테이블이 정리됩니다!
+          </p>
+          <p className="text-white/70 text-xs mt-1">분실 시 책임지지 않습니다</p>
+        </div>
+      </div>
+
       <div className="p-4 flex flex-col gap-4 pb-8">
         {/* 주문 내역 */}
         <div>
