@@ -25,15 +25,16 @@ const getRelativeTime = (utcString: string) => {
 
 export default function AdminPage() {
   const [orders, setOrders] = useState<Order[]>([])
-  const [activeTab, setActiveTab] = useState<'pending' | 'confirmed' | 'stats'>('pending')
+  const [activeTab, setActiveTab] = useState<'pending' | 'confirmed' | 'stats' | 'menu'>('pending')
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [selectedDay, setSelectedDay] = useState<string>('전체')
   const [deleteTarget, setDeleteTarget] = useState<Order | null>(null)
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
   const [newOrderIds, setNewOrderIds] = useState<Set<number>>(new Set())
-  // menu_id → admin_name, customer name → admin_name (for set constituent lookup)
   const [nameById, setNameById] = useState<Record<number, string>>({})
   const [nameByCustomer, setNameByCustomer] = useState<Record<string, string>>({})
+  const [allMenus, setAllMenus] = useState<Array<{ id: number; name: string; admin_name: string | null; category: string; is_available: boolean; price: number }>>([])
+  const [editingMenu, setEditingMenu] = useState<{ id: number; admin_name: string } | null>(null)
 
   useEffect(() => {
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {})
@@ -49,8 +50,9 @@ export default function AdminPage() {
     }
 
     const fetchMenuNames = async () => {
-      const { data } = await supabase.from('menus').select('id, name, admin_name')
+      const { data } = await supabase.from('menus').select('id, name, admin_name, category, is_available, price').order('category')
       if (!data) return
+      setAllMenus(data)
       const byId: Record<number, string> = {}
       const byCustomer: Record<string, string> = {}
       for (const m of data) {
@@ -154,6 +156,25 @@ export default function AdminPage() {
     setOrders(prev => prev.map(o => o.id === id ? { ...o, status: 'confirmed' } : o))
   }
 
+  const toggleAvailable = async (id: number, current: boolean) => {
+    await supabase.from('menus').update({ is_available: !current }).eq('id', id)
+    setAllMenus(prev => prev.map(m => m.id === id ? { ...m, is_available: !current } : m))
+  }
+
+  const saveAdminName = async () => {
+    if (!editingMenu) return
+    const val = editingMenu.admin_name.trim() || null
+    await supabase.from('menus').update({ admin_name: val }).eq('id', editingMenu.id)
+    setAllMenus(prev => prev.map(m => m.id === editingMenu.id ? { ...m, admin_name: val } : m))
+    setNameById(prev => {
+      const next = { ...prev }
+      if (val) next[editingMenu.id] = val
+      else delete next[editingMenu.id]
+      return next
+    })
+    setEditingMenu(null)
+  }
+
   const deleteOrder = async () => {
     if (!deleteTarget) return
     await supabase.from('orders').delete().eq('id', deleteTarget.id)
@@ -219,11 +240,13 @@ export default function AdminPage() {
     XLSX.writeFile(wb, `게스트하우스융_${period}.xlsx`)
   }
 
+  const soldOutCount = allMenus.filter(m => !m.is_available).length
   const tabs = [
-    { key: 'pending', label: '대기중', count: pending.length },
-    { key: 'confirmed', label: '완료', count: confirmed.length },
-    { key: 'stats', label: '통계', count: null },
-  ] as const
+    { key: 'pending' as const, label: '대기중', count: pending.length },
+    { key: 'confirmed' as const, label: '완료', count: confirmed.length },
+    { key: 'stats' as const, label: '통계', count: null as number | null },
+    { key: 'menu' as const, label: '메뉴관리', count: soldOutCount > 0 ? soldOutCount : null as number | null },
+  ]
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -551,7 +574,7 @@ export default function AdminPage() {
 
                       {expandedId === order.id && (
                         <div className="px-4 pb-3 pt-2 bg-gray-50 flex flex-wrap gap-1.5">
-                          {order.items.map((item, i) => (
+                          {order.items.map((item, i) => (                
                             <div key={i} className="bg-white border border-gray-100 rounded-lg px-2.5 py-1 flex items-center gap-1">
                               <span className="text-xs text-gray-700">{getAdminName(item)}</span>
                               <span className="text-xs font-bold text-gray-400">×{item.quantity}</span>
@@ -569,6 +592,68 @@ export default function AdminPage() {
                 </div>
               </div>
             )}
+          </>
+        )}
+
+        {/* 메뉴관리 탭 */}
+        {activeTab === 'menu' && (
+          <>
+            <p className="text-xs text-gray-400 px-1">품절 처리하면 고객 메뉴판에서 즉시 숨겨져요. 총관 이름을 탭해서 수정할 수 있어요.</p>
+            {Object.entries(
+              allMenus.reduce((acc, m) => {
+                if (!acc[m.category]) acc[m.category] = []
+                acc[m.category].push(m)
+                return acc
+              }, {} as Record<string, typeof allMenus>)
+            ).map(([category, items]) => (
+              <div key={category} className="bg-white rounded-2xl overflow-hidden shadow-sm">
+                <div className="px-4 py-2.5 bg-gray-50 border-b">
+                  <span className="font-semibold text-sm text-gray-600">{category}</span>
+                </div>
+                <div className="divide-y divide-gray-50">
+                  {items.map(menu => (
+                    <div key={menu.id} className={`px-4 py-3.5 flex items-center gap-3 ${!menu.is_available ? 'opacity-50' : ''}`}>
+                      <div className="flex-1 min-w-0">
+                        <p className={`font-medium text-sm ${menu.is_available ? 'text-gray-900' : 'text-gray-400 line-through'}`}>
+                          {menu.name}
+                        </p>
+                        {editingMenu?.id === menu.id ? (
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <input
+                              autoFocus
+                              value={editingMenu.admin_name}
+                              onChange={e => setEditingMenu({ ...editingMenu, admin_name: e.target.value })}
+                              onKeyDown={e => { if (e.key === 'Enter') saveAdminName(); if (e.key === 'Escape') setEditingMenu(null) }}
+                              className="text-xs border border-[#189ad3] rounded-lg px-2 py-1 w-32 outline-none text-gray-700"
+                              placeholder="총관 이름"
+                            />
+                            <button onClick={saveAdminName} className="text-xs text-white bg-[#189ad3] px-2 py-1 rounded-lg font-medium">저장</button>
+                            <button onClick={() => setEditingMenu(null)} className="text-xs text-gray-400">취소</button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setEditingMenu({ id: menu.id, admin_name: menu.admin_name ?? '' })}
+                            className="text-xs text-gray-400 mt-0.5 text-left hover:text-[#189ad3] transition"
+                          >
+                            총관: {menu.admin_name ?? menu.name}
+                          </button>
+                        )}
+                      </div>
+                      <span className="text-xs text-gray-500 shrink-0">{menu.price.toLocaleString()}원</span>
+                      <button
+                        onClick={() => toggleAvailable(menu.id, menu.is_available)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all active:scale-95 shrink-0
+                          ${menu.is_available
+                            ? 'bg-green-100 text-green-700'
+                            : 'bg-red-100 text-red-500'}`}
+                      >
+                        {menu.is_available ? '판매중' : '품절'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
           </>
         )}
 

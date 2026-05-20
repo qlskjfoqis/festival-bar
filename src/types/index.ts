@@ -4,6 +4,7 @@ export type Menu = {
   admin_name: string | null
   description: string | null
   price: number
+  original_price: number | null
   category: string
   is_available: boolean
   image_url: string | null
