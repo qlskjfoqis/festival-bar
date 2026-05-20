@@ -7,6 +7,14 @@ import type { Menu, OrderItem } from '@/types'
 
 const TABLE_FEE_PER_PERSON = 1000
 
+// 세트 구성품 품절 시 대체 메뉴 (고객 메뉴명 기준)
+const SET_SUBSTITUTIONS: Record<string, Record<string, string>> = {
+  'A세트': { '오뎅탕': '일반 대패', '탕수육': '오뎅탕', '계란말이': '토스트' },
+  'B세트': { '마라샹궈': '일반 대패', '탕수육': '오뎅탕' },
+  'C세트': { '일반 대패': '마라샹궈', '오뎅탕': '탕수육', '불닭볶음면': '라면' },
+}
+
+
 type SetGroup = {
   id: number
   set_menu_id: number
@@ -48,7 +56,7 @@ function MenuContent() {
       ])
 
       if (!menusRes.data) return
-      setMenus(menusRes.data.filter((m: Menu) => m.is_available))
+      setMenus(menusRes.data)
 
       if (groupsRes.data && itemsRes.data) {
         const menuMap = new Map(menusRes.data.map((m: Menu) => [m.id, m]))
@@ -67,6 +75,26 @@ function MenuContent() {
       }
     }
     fetchData()
+
+    const channel = supabase
+      .channel('menus-realtime')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'menus' }, (payload) => {
+        const updated = payload.new as Menu
+        setMenus(prev => prev.map(m => m.id === updated.id ? updated : m))
+      })
+      .subscribe()
+
+    // Publications 미설정 대비: 5초마다 메뉴 가용성 재조회
+    const fetchMenusOnly = async () => {
+      const { data } = await supabase.from('menus').select('*')
+      if (data) setMenus(data)
+    }
+    const menuPoll = setInterval(fetchMenusOnly, 5_000)
+
+    return () => {
+      supabase.removeChannel(channel)
+      clearInterval(menuPoll)
+    }
   }, [])
 
   const confirmPersonCount = () => {
@@ -150,8 +178,8 @@ function MenuContent() {
     if (!activeSet || !isSelectionComplete()) return
 
     const fixedGroups = (setGroups[activeSet.id] ?? []).filter(g => !isChoiceGroup(g))
-    const fixedLabels = fixedGroups.flatMap(g => g.items.map(i => i.name))
-    const fixedAdminLabels = fixedGroups.flatMap(g => g.items.map(i => i.admin_name || i.name))
+    const fixedLabels = fixedGroups.flatMap(g => g.items.map(i => resolveSubstitute(activeSet.name, i)))
+    const fixedAdminLabels = fixedGroups.flatMap(g => g.items.map(i => resolveSubstituteAdmin(activeSet.name, i)))
 
     const choiceGroups = (setGroups[activeSet.id] ?? []).filter(isChoiceGroup)
     const choiceLabels = choiceGroups
@@ -198,6 +226,28 @@ function MenuContent() {
   const totalPrice = cart.reduce((sum, i) => sum + i.price * i.quantity, 0)
   const cartCount = cart.reduce((sum, i) => sum + i.quantity, 0)
   const menuCategoryMap = new Map(menus.map(m => [m.id, m.category]))
+  const menuAvailableMap = new Map(menus.map(m => [m.id, m.is_available]))
+  // admin_name(짧은 이름) → 고객용 전체 이름 매핑
+  const adminToCustomerName = new Map(menus.map(m => [(m.admin_name || m.name).trim(), m.name]))
+
+  // 품절 시 대체 메뉴 이름(고객용) 반환 — admin_name 기준으로 매칭
+  const resolveSubstitute = (setName: string, item: Menu): string => {
+    const isAvail = menuAvailableMap.get(item.id) ?? true
+    if (isAvail) return item.name
+    const key = (item.admin_name || item.name).trim()
+    const subKey = SET_SUBSTITUTIONS[setName.trim()]?.[key]
+    if (!subKey) return item.name
+    return adminToCustomerName.get(subKey.trim()) ?? item.name
+  }
+
+  // admin 표시용 대체 이름 반환
+  const resolveSubstituteAdmin = (setName: string, item: Menu): string => {
+    const isAvail = menuAvailableMap.get(item.id) ?? true
+    if (isAvail) return item.admin_name || item.name
+    const key = (item.admin_name || item.name).trim()
+    return SET_SUBSTITUTIONS[setName.trim()]?.[key] ?? (item.admin_name || item.name)
+  }
+
   const isSetMenu = (menuId: number) => menuId in setGroups
   const isAdditionalOrder = personCount === 0
 
@@ -389,7 +439,7 @@ function MenuContent() {
                   return (
                     <div
                       key={menu.id}
-                      className="bg-amber-50 border border-amber-200 rounded-2xl overflow-hidden"
+                      className={`bg-amber-50 border border-amber-200 rounded-2xl overflow-hidden ${!menu.is_available ? 'opacity-50' : ''}`}
                     >
                       <div className="px-4 pt-4 pb-3 flex items-start justify-between gap-3">
                         <div className="flex-1 min-w-0">
@@ -413,14 +463,16 @@ function MenuContent() {
                                       택1
                                     </span>
                                     <span className="leading-relaxed">
-                                      {g.items.map(i => i.name).join(' 또는 ')}
+                                      {g.items.filter(i => menuAvailableMap.get(i.id) ?? true).map(i => i.name).join(' 또는 ')}
                                     </span>
                                   </>
                                 ) : (
                                   <>
                                     <span className="text-amber-500 mt-0.5 shrink-0">✦</span>
                                     <span className="leading-relaxed flex flex-col gap-0.5">
-                                      {g.items.map(i => <span key={i.id}>{i.name}</span>)}
+                                      {g.items.map(i => (
+                                        <span key={i.id}>{resolveSubstitute(menu.name, i)}</span>
+                                      ))}
                                     </span>
                                   </>
                                 )}
@@ -428,12 +480,18 @@ function MenuContent() {
                             ))}
                           </div>
                         </div>
-                        <button
-                          onClick={() => openSetModal(menu)}
-                          className="px-3 py-2 rounded-xl bg-[#e07640] text-white text-sm font-semibold shrink-0 shadow-sm active:scale-95 transition-transform"
-                        >
-                          선택
-                        </button>
+                        {menu.is_available ? (
+                          <button
+                            onClick={() => openSetModal(menu)}
+                            className="px-3 py-2 rounded-xl bg-[#e07640] text-white text-sm font-semibold shrink-0 shadow-sm active:scale-95 transition-transform"
+                          >
+                            선택
+                          </button>
+                        ) : (
+                          <span className="px-3 py-2 rounded-xl bg-gray-100 text-gray-400 text-sm font-semibold shrink-0">
+                            품절
+                          </span>
+                        )}
                       </div>
 
                       {cartItems.length > 0 && (
@@ -458,7 +516,7 @@ function MenuContent() {
                 }
 
                 return (
-                  <div key={menu.id} className="bg-white rounded-2xl shadow-sm overflow-hidden">
+                  <div key={menu.id} className={`bg-white rounded-2xl shadow-sm overflow-hidden ${!menu.is_available ? 'opacity-50' : ''}`}>
                     <div className="px-4 py-3.5 flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
                         <p className="font-medium text-sm text-[#1c1208] leading-snug">{menu.name}</p>
@@ -466,12 +524,18 @@ function MenuContent() {
                           {menu.price.toLocaleString()}원
                         </p>
                       </div>
-                      <button
-                        onClick={() => setActiveDesc(menu)}
-                        className="px-3 py-2 rounded-xl bg-[#e07640] text-white text-sm font-semibold shrink-0 shadow-sm active:scale-95 transition-transform"
-                      >
-                        선택
-                      </button>
+                      {menu.is_available ? (
+                        <button
+                          onClick={() => setActiveDesc(menu)}
+                          className="px-3 py-2 rounded-xl bg-[#e07640] text-white text-sm font-semibold shrink-0 shadow-sm active:scale-95 transition-transform"
+                        >
+                          선택
+                        </button>
+                      ) : (
+                        <span className="px-3 py-2 rounded-xl bg-gray-100 text-gray-400 text-sm font-semibold shrink-0">
+                          품절
+                        </span>
+                      )}
                     </div>
 
                     {cartItems.length > 0 && (
@@ -538,7 +602,7 @@ function MenuContent() {
 
                   {isChoiceGroup(g) ? (
                     <div className="flex flex-col gap-2">
-                      {g.items.map(item => {
+                      {g.items.filter(item => menuAvailableMap.get(item.id) ?? true).map(item => {
                         const selected = (groupSelections[g.id] ?? []).includes(item.id)
                         return (
                           <button
@@ -565,7 +629,7 @@ function MenuContent() {
                       {g.items.map(item => (
                         <div key={item.id} className="flex items-center gap-2 text-sm text-[#5c3d1e]">
                           <span className="text-amber-400">✦</span>
-                          <span>{item.name}</span>
+                          <span>{resolveSubstitute(activeSet.name, item)}</span>
                         </div>
                       ))}
                     </div>
